@@ -243,6 +243,47 @@ def running_from_managed_venv(layout: ManagedVenvLayout | None = None) -> bool:
     return layout.is_managed_tree(Path(sys.executable))
 
 
+def legacy_nested_venv() -> Path:
+    """The venv an earlier ``cli.sh`` created INSIDE the data home.
+
+    Mirrors cli.sh's ``_OLD_VENV`` (``<data home>/venv``) exactly. The current
+    installer retires it: a re-run that lands a working tree beside the data
+    home repoints the stable link and the launcher at that tree, then
+    ``rm -rf``s this one. The gateway's own wheel auto-update drives that
+    re-run, so the deletion can happen underneath the running process.
+    """
+    return data_home() / "venv"
+
+
+def _respawn_tree_is_managed(layout: ManagedVenvLayout) -> bool:
+    """Is the tree serving THIS process one a restart may re-route?
+
+    Identity is read from the interpreter's ``bin/`` directory, not from the
+    interpreter file: ``python -m venv`` writes ``bin/python3`` as a symlink
+    to the base interpreter, so resolving the file lands outside every venv
+    and would answer "not managed" for every real install. The directory
+    resolves through the layout's own links (stable link -> versioned tree)
+    and stops there.
+
+    Two identities qualify. A tree of this layout (legacy or versioned), and
+    the retired in-data-home venv — our own environment from an earlier
+    installer, which the same cli.sh re-run that lands the new tree deletes
+    from under the running gateway; without the stable link that process has
+    no interpreter left to exec. This is the respawn identity only: the
+    dispatch predicate for the shadow-build path is
+    :func:`running_from_managed_venv`, which keeps its own rule.
+    """
+    bin_dir = Path(sys.executable).parent
+    if layout.is_managed_tree(bin_dir):
+        return True
+    try:
+        resolved = bin_dir.resolve()
+        nested = legacy_nested_venv().resolve()
+    except OSError:
+        return False
+    return resolved == nested or resolved.is_relative_to(nested)
+
+
 def respawn_executable() -> str:
     """The interpreter a gateway restart should exec.
 
@@ -257,11 +298,18 @@ def respawn_executable() -> str:
     Falls back to ``sys.executable`` whenever the stable link does not exist
     or does not carry a usable interpreter, so a broken or absent link can
     never take the restart path away.
+
+    One more shape routes here: a process still served by the retired
+    in-data-home venv (:func:`legacy_nested_venv`). The installer re-run that
+    migrates it deletes that venv after repointing the stable link, so
+    ``sys.executable`` is gone and the stable link is the only interpreter
+    left; before that re-run there is no stable link and the fallback keeps
+    the restart on the nested venv, unchanged.
     """
     if not IS_POSIX:
         return sys.executable
     layout = managed_venv_layout()
-    if not running_from_managed_venv(layout):
+    if not _respawn_tree_is_managed(layout):
         return sys.executable
     # The link's TARGET must resolve inside this layout's own trees before it
     # is trusted with an exec: a stable link repointed outside the managed
@@ -935,6 +983,7 @@ __all__ = [
     "build_shadow_venv",
     "download_verified_wheel",
     "fetch_verified_manifest",
+    "legacy_nested_venv",
     "managed_venv_layout",
     "parse_and_validate_manifest",
     "promote",
