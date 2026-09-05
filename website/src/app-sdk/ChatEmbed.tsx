@@ -285,7 +285,11 @@ function ChatEmbed({ slotKey, agent, placeholder, frameless, startAtBottom, onSe
   //   transcript and hand the text back. The old path reported neither -- it
   //   swallowed the SSE stream's parse error as success and never consumed
   //   `sendMutation.isError`, so a failed send looked sent and the text was
-  //   gone.
+  //   gone. (With the app-sdk wire, a rejected fetch is reported as
+  //   `response-late`, not `transport-error`: one POST with no response cannot
+  //   tell "never left" from "accepted, then the connection dropped", and the
+  //   second means a resend runs the turn twice. The branch stays for the
+  //   contract's sake; the wire does not currently produce it.)
   // - `response-late`: the deadline fired with no receipt either way. ChatPane
   //   leaves this alone because its optimistic bubble is still on screen; this
   //   embed keeps no bubble and the composer has already cleared, so the
@@ -325,7 +329,7 @@ function ChatEmbed({ slotKey, agent, placeholder, frameless, startAtBottom, onSe
           role: 'error',
           content: (reason
             ? i18nT('pages.chatPage.send_failed_with_error', { error: reason })
-            : i18nT('appSdk.chatEmbed.send_failed_connection')) as string,
+            : i18nT('pages.chatPage.send_failed_connection')) as string,
           seenCount,
           sendId,
         })
@@ -335,7 +339,7 @@ function ChatEmbed({ slotKey, agent, placeholder, frameless, startAtBottom, onSe
         const undo = override ? undefined : restoreIntoComposer(draftText)
         setSendTail({
           role: 'notice',
-          content: i18nT(override ? 'appSdk.chatEmbed.delivery_unconfirmed_option' : 'appSdk.chatEmbed.delivery_unconfirmed') as string,
+          content: i18nT(override ? 'pages.chatPage.delivery_unconfirmed_option' : 'pages.chatPage.delivery_unconfirmed') as string,
           seenCount,
           sendId,
           undo,

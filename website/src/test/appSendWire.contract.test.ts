@@ -12,6 +12,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { sendTurn, SEND_ABORT_MS } from '../chat-core/transport/sendTurn'
 import { appApiSendWire } from '../app-sdk/appSendWire'
 import { AppApiError, AppApiPermissionError } from '../app-sdk/apiError'
+import { AcceptedBodyUnreadable } from '../api/apiError'
 import type { AppApi } from '../app-sdk/index'
 
 function apiWith(post: AppApi['post']): AppApi {
@@ -68,12 +69,21 @@ describe('appApiSendWire', () => {
   })
 
   it('classifies a 2xx whose body is not JSON as unknown -- the case the old embed swallowed as success', async () => {
-    // The scoped helper JSON.parses a text body and throws SyntaxError on a
-    // non-JSON one. The bare endpoint answers with an SSE stream, which is
-    // exactly this shape -- and the old `.catch(SyntaxError => undefined)`
-    // reported it as a successful send.
+    // The scoped helper tags a post-2xx parse failure `AcceptedBodyUnreadable`.
+    // The bare endpoint answers with an SSE stream, which is exactly this
+    // shape -- and the old `.catch(SyntaxError => undefined)` reported it as a
+    // successful send.
     vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const post = vi.fn().mockRejectedValue(new SyntaxError('Unexpected token d in JSON'))
+    const post = vi.fn().mockRejectedValue(new AcceptedBodyUnreadable(new SyntaxError('Unexpected token d in JSON')))
+    const receipt = await sendTurn({ message: 'hi', wire: appApiSendWire(apiWith(post)) })
+    expect(receipt.status).toBe('unknown')
+  })
+
+  it('classifies a 2xx whose body stream was cut as unknown, not a failure', async () => {
+    // A body read cut mid-stream is a TypeError -- the same class fetch throws
+    // for a request that never left. The helper's phase tag says a 2xx was
+    // already received, so the server has the message: `unknown`, do nothing.
+    const post = vi.fn().mockRejectedValue(new AcceptedBodyUnreadable(new TypeError('network error')))
     const receipt = await sendTurn({ message: 'hi', wire: appApiSendWire(apiWith(post)) })
     expect(receipt.status).toBe('unknown')
   })
@@ -92,10 +102,15 @@ describe('appApiSendWire', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('not permitted to access /api/chat'))
   })
 
-  it('classifies a rejected fetch (offline, DNS) as transport-error: nothing left the document', async () => {
+  it('classifies a rejected fetch as response-late, never the retry-safe transport-error', async () => {
+    // A raw rejection is "never left" (offline, DNS) OR "the server took the
+    // POST and the connection reset before headers" -- one POST, no way to
+    // tell. The second means a retry runs the turn twice, so the receipt is
+    // indeterminate: the embed hands the text back under the unconfirmed
+    // notice and lets the poll's sendId echo prove delivery.
     const post = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
     const receipt = await sendTurn({ message: 'hi', wire: appApiSendWire(apiWith(post)) })
-    expect(receipt.status).toBe('transport-error')
+    expect(receipt.status).toBe('response-late')
   })
 
   it('honours the transport deadline as response-late even though the scoped api takes no signal', async () => {

@@ -8,9 +8,13 @@
  * looked sent and the composer had already been cleared, so the text was gone.
  *
  * Pinned here:
- * - refused / transport-error -> an `error` row at the transcript's tail with
- *   the server's reason when there is one, and the text handed back to the
- *   composer (merged with anything typed since).
+ * - refused                   -> an `error` row at the transcript's tail with
+ *   the server's reason, and the text handed back to the composer (merged
+ *   with anything typed since).
+ * - a rejected fetch          -> the app-sdk wire reports it as response-late:
+ *   one POST with no response cannot tell "never left" from "accepted, then
+ *   the connection dropped", and the second means a resend runs the turn
+ *   twice -- so it is the unconfirmed case below, not a failure.
  * - response-late             -> the text handed back under a `notice` row
  *   ("unconfirmed"): this embed keeps no optimistic bubble, so the cleared
  *   composer was the only copy -- the recoverable indeterminate outcome.
@@ -28,6 +32,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react'
 import React from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AppApiError, AppApiPermissionError } from '../app-sdk/apiError'
+import { AcceptedBodyUnreadable } from '../api/apiError'
 import { SEND_ABORT_MS } from '../chat-core/transport/sendTurn'
 
 const mockGet = vi.fn()
@@ -103,13 +108,19 @@ describe('ChatEmbed send receipt policy', () => {
     expect(input().value).toBe('hello')
   })
 
-  it('a transport-level failure states its cause (connection) and hands the text back', async () => {
+  it('a rejected fetch is UNCONFIRMED (text back under the notice), never a retry-safe connection failure', async () => {
+    // One POST, no response: "never left" and "the server took it and the
+    // connection reset before headers" look identical from here, and the
+    // second means a resend runs the turn twice. So the embed does what it
+    // does for a late receipt -- hands the text back under the unconfirmed
+    // notice -- and lets the poll's sendId echo retire it if the turn ran.
     mockPost.mockRejectedValue(new TypeError('Failed to fetch'))
     await act(async () => { renderEmbed(<ChatEmbed slotKey="slot-1" />) })
     await typeAndSend('hello')
     await settle()
-    expect(errorRows()).toHaveLength(1)
-    expect(errorRows()[0].textContent).toBe("Couldn't send — check your connection and try again.")
+    expect(errorRows()).toHaveLength(0)
+    expect(noticeRows()).toHaveLength(1)
+    expect(noticeRows()[0].textContent).toMatch(/^Delivery not confirmed/)
     expect(input().value).toBe('hello')
   })
 
@@ -141,7 +152,7 @@ describe('ChatEmbed send receipt policy', () => {
   })
 
   it('an unreadable 2xx (the old swallowed-as-success shape) neither reports nor restores', async () => {
-    mockPost.mockRejectedValue(new SyntaxError('Unexpected token'))
+    mockPost.mockRejectedValue(new AcceptedBodyUnreadable(new SyntaxError('Unexpected token')))
     await act(async () => { renderEmbed(<ChatEmbed slotKey="slot-1" />) })
     await typeAndSend('hello')
     await settle()
