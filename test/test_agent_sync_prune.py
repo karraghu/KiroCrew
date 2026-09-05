@@ -74,6 +74,33 @@ class TestAgentSyncPrune:
         cfg.save.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_prune_keeps_a_starred_package_agent(self):
+        """A starred crew survives the package going away: pruning it would drop
+        the star, and the reinstall re-add builds a fresh un-starred record."""
+        agents = {
+            "omni-reviewer": KiroCrewAgentConfig(
+                kiro_agent="omni-reviewer", source="aim", starred=True
+            ),
+            "omni-aws": KiroCrewAgentConfig(kiro_agent="omni-aws", source="aim"),
+            "gpu-dev": KiroCrewAgentConfig(kiro_agent="gpu-dev", source="package"),
+        }
+        cfg = _make_config(agents)
+        # Only omni-aws is still on disk: both of the others are gone.
+        body = await _run_sync(cfg, [_make_aim_agent("omni-aws")])
+
+        assert body["pruned"] == ["gpu-dev"]
+        assert "omni-reviewer" in cfg.agents
+        assert cfg.agents["omni-reviewer"].starred is True
+        assert "gpu-dev" not in cfg.agents
+
+        # Reinstall: the kept row is NOT duplicated or reset -- the add path
+        # skips names already present, so the star survives the round trip.
+        body = await _run_sync(cfg, [_make_aim_agent("omni-aws"), _make_aim_agent("omni-reviewer")])
+        assert body["synced"] == []
+        assert body["pruned"] == []
+        assert cfg.agents["omni-reviewer"].starred is True
+
+    @pytest.mark.asyncio
     async def test_prune_skips_kirocrew_owned_agents(self):
         """Agents with source='kirocrew' are never pruned."""
         agents = {

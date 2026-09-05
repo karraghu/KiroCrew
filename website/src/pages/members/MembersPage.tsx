@@ -21,19 +21,21 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Circle, Clock, ExternalLink, Pencil, UserPlus, Users, Webhook } from 'lucide-react'
+import { ArrowLeft, Circle, Clock, ExternalLink, Pencil, Star, UserPlus, Users, Webhook } from 'lucide-react'
 import { PanelRightSolid } from '../../components/icons/panels'
 import { useTranslation } from 'react-i18next'
 import { api, type MemberActivityEntry, type MemberRosterRow, type WebhookTokenEntry } from '../../api/client'
 import type { CronJob } from '../../types'
 import { wakesCrew, webhookBoundToCrew } from '../../components/crew/wakesCrew'
 import { timeAgo } from '../../utils/timeAgo'
+import { safeGetItem, safeSetItem } from '../../utils/safeStorage'
 import { useAppDispatch, useAppSelector } from '../../store'
 import { markSlotRead } from '../../store/dashboardSlice'
 import CrewAvatar from '../../components/CrewAvatar'
 import ChatPane from '../../components/ChatPane'
 import DetailPanel from '../../components/DetailPanel'
 import ErrorBoundary from '../../components/ErrorBoundary'
+import ErrorNotice from '../../components/ErrorNotice'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { SearchInput } from '../../components/ui'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -72,6 +74,45 @@ const THREAD_MIN_RESERVE = CHAT_PANE_MIN_W + 24
 const PROJECT_SEPARATOR = ' \u00b7 '
 /** Driving-sessions rows shown before the list folds behind "Show all". */
 const DRIVING_VISIBLE = 5
+/** Roster filter persistence — same `mc-` localStorage family as the rest of
+ *  the dashboard's view preferences (ChatSidebar's session filters use the
+ *  same idiom). Only the TOGGLES live here; the star mark itself is a crew
+ *  field on the server. */
+const STARRED_ONLY_KEY = 'mc-members-starred-only'
+const SOURCE_FILTER_KEY = 'mc-members-source'
+/** Source chips. `mine` = crews created in the crew manager (source
+ *  'kirocrew'); `builtin` = shipped with Kiro Crew; `package` = written by the
+ *  agent sync from installed capability packages — on a busy host the large
+ *  majority of the roster, and the reason the filter exists. */
+export type MemberSourceFilter = 'all' | 'mine' | 'builtin' | 'package'
+const SOURCE_CHIPS: readonly Exclude<MemberSourceFilter, 'all'>[] = ['mine', 'builtin', 'package']
+/** Static key per chip — a map, not a template, so `check-i18n-keys` can
+ *  resolve every reference (assembled keys are a counted blind spot there). */
+const SOURCE_CHIP_LABEL_KEY: Record<Exclude<MemberSourceFilter, 'all'>, string> = {
+  mine: 'pages.membersPage.filter_source_mine',
+  builtin: 'pages.membersPage.filter_source_builtin',
+  package: 'pages.membersPage.filter_source_package',
+}
+/** Hover tooltip per chip: the one-word labels ("From packages") are not
+ *  self-explaining to a reader who has never installed a capability package. */
+const SOURCE_CHIP_TITLE_KEY: Record<Exclude<MemberSourceFilter, 'all'>, string> = {
+  mine: 'pages.membersPage.filter_source_mine_description',
+  builtin: 'pages.membersPage.filter_source_builtin_description',
+  package: 'pages.membersPage.filter_source_package_description',
+}
+export function parseSourceFilter(raw: string | null): MemberSourceFilter {
+  return raw === 'mine' || raw === 'builtin' || raw === 'package' ? raw : 'all'
+}
+/** The server normalizes `source` to kirocrew | builtin | package before it
+ *  reaches the wire; the fallback-to-package here only covers a row from an
+ *  older gateway that omits the field. */
+export function matchesSource(m: { source?: unknown }, f: MemberSourceFilter): boolean {
+  if (f === 'all') return true
+  const src = typeof m.source === 'string' ? m.source : ''
+  if (f === 'mine') return src === 'kirocrew'
+  if (f === 'builtin') return src === 'builtin'
+  return src !== 'kirocrew' && src !== 'builtin'
+}
 /** How each shared tab status renders on a driving row. The ORDER lives in
  *  `tabStatus` (lib/sessionTabs.ts) — this only maps its verdict to a dot
  *  class, an i18n label, and whether the label is spoken aloud in the row.
@@ -166,6 +207,64 @@ export default function MembersPage() {
   // members fall to the bottom alphabetically. Sorted once from the roster
   // snapshot — live re-sorting mid-session would move rows under the cursor.
   const [filter, setFilter] = useState('')
+  // Persistent roster filters. The agent sync writes every package-installed
+  // agent spec into the roster, so a host with a few dozen installed packages
+  // shows dozens of crews the user never drives. Both toggles survive a page
+  // change (same localStorage idiom as ChatSidebar's session filters); the
+  // star itself is server-side (`starred` on the crew), so it survives a
+  // reinstall and follows the config to another dashboard.
+  const [starredOnly, setStarredOnly] = useState(
+    () => safeGetItem(STARRED_ONLY_KEY) === '1',
+  )
+  const [sourceFilter, setSourceFilter] = useState<MemberSourceFilter>(() =>
+    parseSourceFilter(safeGetItem(SOURCE_FILTER_KEY)),
+  )
+  const toggleStarredOnly = useCallback(() => {
+    setStarredOnly((prev) => {
+      safeSetItem(STARRED_ONLY_KEY, prev ? '0' : '1')
+      return !prev
+    })
+  }, [])
+  const pickSource = useCallback((next: MemberSourceFilter) => {
+    setSourceFilter((prev) => {
+      // Clicking the active chip clears it back to "all" — one chip row,
+      // no separate reset control.
+      const v = prev === next ? 'all' : next
+      safeSetItem(SOURCE_FILTER_KEY, v)
+      return v
+    })
+  }, [])
+  // Star toggle: optimistic flip, reverted if the PUT fails. The star lives
+  // on the crew record, not the DM thread, so it goes through the crew
+  // update endpoint rather than a members route. A failed write (403 for a
+  // non-owner, 500 on a failed config save) is SURFACED, not just reverted:
+  // a star that snaps back with no message reads as a broken button, and
+  // AUTOSDE's errors-use-error-notice forbids the silent catch-to-default.
+  const [starError, setStarError] = useState('')
+  // Names with a star write in flight. The control is disabled while its
+  // write is pending, so two rapid toggles cannot race: without this, a
+  // second click whose write also fails would revert to the FIRST click's
+  // value and leave the row starred while the server is not.
+  const [starPending, setStarPending] = useState<Set<string>>(() => new Set())
+  const toggleStar = useCallback((m: MemberRosterRow) => {
+    const next = !m.starred
+    setStarError('')
+    setStarPending((prev) => new Set(prev).add(m.name))
+    setMembers((prev) => prev.map((r) => (r.name === m.name ? { ...r, starred: next } : r)))
+    api
+      .updateKirocrewAgent(m.name, { starred: next })
+      .catch((err: unknown) => {
+        setMembers((prev) => prev.map((r) => (r.name === m.name ? { ...r, starred: !next } : r)))
+        setStarError(err instanceof Error && err.message ? err.message : t('pages.membersPage.star_failed'))
+      })
+      .finally(() => {
+        setStarPending((prev) => {
+          const n = new Set(prev)
+          n.delete(m.name)
+          return n
+        })
+      })
+  }, [t])
   // The chat side panel's right-dock mount preset — module-pure, so one
   // constant serves every render.
   const drawerMotion = sidePanelDockMotion('right')
@@ -173,14 +272,24 @@ export default function MembersPage() {
   // DetailPanel's own docked width animation on md+ (same breakpoint as the
   // width-gated drawerOpen initializer above).
   const isMobile = useIsMobile()
+  const starredCount = useMemo(() => members.filter((m) => !!m.starred).length, [members])
   const sortedMembers = useMemo(() => {
     const ordered = [...members].sort(
       (a, b) =>
         (b.last_active_ts ?? 0) - (a.last_active_ts ?? 0) || compareText(a.name, b.name),
     )
     const q = filter.trim().toLowerCase()
-    return q ? ordered.filter((m) => m.name.toLowerCase().includes(q)) : ordered
-  }, [members, filter])
+    return ordered.filter(
+      (m) =>
+        (!starredOnly || !!m.starred) &&
+        matchesSource(m, sourceFilter) &&
+        (!q || m.name.toLowerCase().includes(q)),
+    )
+  }, [members, filter, starredOnly, sourceFilter])
+  // True when the filters (not the search) hid everything — the empty-roster
+  // copy would be wrong then, since the roster is not empty.
+  const filteredOut =
+    loaded && !loadError && members.length > 0 && sortedMembers.length === 0 && !filter.trim()
   const activeSlot = active ? slots[active.name] ?? '' : ''
   const activeError = active ? errors[active.name] ?? '' : ''
 
@@ -444,6 +553,59 @@ export default function MembersPage() {
             data-testid="member-search"
           />
         </div>
+        {/* Filter chips: star toggle first, then origin. Pressed state is
+            aria-pressed so the filter reads to AT as a toggle, not a link. */}
+        <div className="px-2 pb-2 flex flex-wrap items-center gap-1" data-testid="member-filters">
+          <button
+            type="button"
+            onClick={toggleStarredOnly}
+            aria-pressed={starredOnly}
+            className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] border transition-colors ${
+              starredOnly
+                ? 'border-accent text-accent bg-accent-subtle'
+                : 'border-border text-muted hover:text-text hover:bg-bg-hover'
+            }`}
+            title={t('pages.membersPage.filter_starred_description')}
+            data-testid="member-filter-starred"
+          >
+            <Star
+              size={11}
+              className="lucide-inline"
+              {...(starredOnly ? { fill: 'var(--accent)', stroke: 'none' } : {})}
+            />
+            {t('pages.membersPage.filter_starred')}
+            {starredCount > 0 && <span className="opacity-70">{starredCount}</span>}
+          </button>
+          {SOURCE_CHIPS.map((chip) => (
+            <button
+              key={chip}
+              type="button"
+              onClick={() => pickSource(chip)}
+              aria-pressed={sourceFilter === chip}
+              className={`inline-flex items-center h-6 px-2 rounded-full text-[11px] border transition-colors ${
+                sourceFilter === chip
+                  ? 'border-accent text-accent bg-accent-subtle'
+                  : 'border-border text-muted hover:text-text hover:bg-bg-hover'
+              }`}
+              title={t(SOURCE_CHIP_TITLE_KEY[chip])}
+              data-testid={`member-filter-source-${chip}`}
+            >
+              {t(SOURCE_CHIP_LABEL_KEY[chip])}
+            </button>
+          ))}
+        </div>
+        {/* Star-write failure. Falsy message renders nothing. askAgent is ON:
+            the roster holds no unsaved draft, so the hand-off's navigation
+            destroys nothing (AUTOSDE errors-use-error-notice). */}
+        <div className="px-2">
+          <ErrorNotice
+            message={starError}
+            title={t('pages.membersPage.star_failed_title')}
+            onDismiss={() => setStarError('')}
+            askAgent
+            testId="member-star-error"
+          />
+        </div>
         <ul
           className="flex-1 overflow-y-auto scrollbar-none list-none m-0 px-2 pb-2"
           style={{ scrollbarWidth: 'none' }}
@@ -468,13 +630,33 @@ export default function MembersPage() {
               {t('pages.membersPage.roster_load_failed')}
             </li>
           )}
+          {filteredOut && (
+            <li className="px-4 py-6 text-xs text-muted" data-testid="member-filtered-out">
+              <p>{t('pages.membersPage.filters_hide_all')}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  if (starredOnly) toggleStarredOnly()
+                  if (sourceFilter !== 'all') pickSource(sourceFilter)
+                }}
+                className="mt-2 inline-flex items-center gap-1 text-[11.5px] px-2 py-1 rounded border border-border hover:bg-accent/40"
+                data-testid="member-filters-clear"
+              >
+                {t('pages.membersPage.filters_clear')}
+              </button>
+            </li>
+          )}
           {sortedMembers.map((m) => (
-            <li key={m.name}>
+            <li key={m.name} className="group/row relative">
               {/* Same rounded-row idiom as ChatSidebar's session rows, so the
-                  two conversation lists read as one family. */}
+                  two conversation lists read as one family. The star is a
+                  SIBLING of the row button, not a child: a button inside a
+                  button is invalid HTML and breaks keyboard activation. It is
+                  absolutely placed over the row's right padding so the row
+                  keeps its single click target and the label its width. */}
               <button
                 onClick={() => openMember(m)}
-                className={`w-full flex items-center gap-2.5 pl-2.5 pr-2 py-2 rounded-md text-left transition-all select-none ${
+                className={`w-full flex items-center gap-2.5 pl-2.5 pr-8 py-2 rounded-md text-left transition-all select-none ${
                   m.name === activeName
                     ? 'text-text-strong bg-accent-subtle'
                     : 'text-muted hover:text-text hover:bg-bg-hover'
@@ -524,6 +706,32 @@ export default function MembersPage() {
                     data-testid="member-unread-dot"
                   />
                 )}
+              </button>
+              {/* Star: always rendered when starred. Unstarred: visible below md
+                  (touch has no hover or keyboard focus to reveal it), hover /
+                  focus-revealed at md+ so a desktop roster stays quiet. Never
+                  hidden from AT — opacity, not display. */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  toggleStar(m)
+                }}
+                aria-pressed={!!m.starred}
+                disabled={starPending.has(m.name)}
+                aria-label={t(m.starred ? 'pages.membersPage.unstar' : 'pages.membersPage.star', { name: m.name })}
+                title={t(m.starred ? 'pages.membersPage.unstar' : 'pages.membersPage.star', { name: m.name })}
+                className={`absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-bg-hover transition-opacity ${
+                  m.starred
+                    ? 'opacity-100 text-accent'
+                    : 'md:opacity-0 md:group-hover/row:opacity-100 md:focus-visible:opacity-100 text-muted'
+                }`}
+                data-testid={`member-star-${m.slug}`}
+              >
+                <Star
+                  size={13}
+                  {...(m.starred ? { fill: 'var(--accent)', stroke: 'none' } : {})}
+                />
               </button>
             </li>
           ))}
