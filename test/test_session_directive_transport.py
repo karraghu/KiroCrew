@@ -28,6 +28,7 @@ import ast
 import json
 import types
 
+import pytest
 from source_corpus import parsed_candidates, src_root
 
 from kiro_crew import session_directive as sd
@@ -355,6 +356,155 @@ class TestSurvivesPreSerialisedResultText:
     def test_plain_text_output_is_untouched(self):
         out = _runtime_output(_update(content=[{"content": {"type": "text", "text": "ok"}}]))
         assert out == "ok"
+
+
+class TestSurvivesADuplicatingResultEnvelope:
+    """The backend copies the whole result text into SEVERAL envelope fields.
+
+    KAS returns ``{"response": <text>, "imageBase64Urls": [], "message": <same
+    text>}``, so one directive arrives as two byte-identical marker-bearing
+    strings and the frame's whole-text sentinel count is 2. Both the ambiguity
+    refusal and ``_marker_bearing_text``'s single-match rule then declined, so no
+    selector could be read, the gateway-parked record was never claimed, and a
+    ``monitor_start`` the model had been told was requested armed no loop at all
+    (reproduced from a live ``kirocrew-conductor`` frame). Two copies of ONE
+    payload pose no choice, so there is nothing to guess between.
+    """
+
+    @staticmethod
+    def _kas(text: str) -> str:
+        """The live KAS envelope, pre-serialised as that backend hands it back."""
+        dumped = json.dumps({"response": text, "imageBase64Urls": [], "message": text})
+        assert dumped.count(sd.SENTINEL) == 2, "the duplication is the point"
+        assert sd.peek(dumped) is None, "and the selector does not survive the dump"
+        return dumped
+
+    def test_duplicated_directive_is_recovered(self):
+        repaired = _repair_escaped_marker(self._kas(_monitor()))
+        assert repaired is not None, "a duplicated copy is not an ambiguous frame"
+        assert sd.peek(repaired) == ("monitor_start", MONITOR_ARGS)
+
+    def test_duplicated_directive_is_recovered_through_the_runtime(self):
+        # The path the conductor session actually took: the parser must hand the
+        # consumer a frame whose selector reads, or nothing claims the record.
+        for label, update in {
+            "Json.stdout": _update(
+                rawOutput={"items": [{"Json": {"stdout": self._kas(_monitor())}}]}
+            ),
+            "Text": _update(rawOutput={"items": [{"Text": self._kas(_monitor())}]}),
+            "content block": _update(
+                content=[{"content": {"type": "text", "text": self._kas(_monitor())}}]
+            ),
+        }.items():
+            assert sd.peek(_runtime_output(update)) == ("monitor_start", MONITOR_ARGS), label
+
+    def test_two_different_directives_across_fields_are_still_refused(self):
+        # Deduping must key on the VALUE. Two fields carrying DIFFERENT payloads
+        # are a real choice, and picking either applies a directive the tool did
+        # not emit for this frame.
+        other = sd.encode("monitor_start", {**MONITOR_ARGS, "idle_secs": 900}, "Armed: 900s.")
+        frame = json.dumps({"response": _monitor(), "message": other})
+        assert _repair_escaped_marker(frame) is None
+
+    def test_one_field_holding_two_directives_is_refused(self):
+        # The caller's multi-marker refusal guards only its line-based recovery,
+        # so the envelope branch must reject a single string naming two
+        # directives itself -- otherwise it resolves to whichever came first.
+        other = sd.encode("monitor_start", {**MONITOR_ARGS, "idle_secs": 900}, "Armed: 900s.")
+        frame = json.dumps({"response": _monitor() + "\n" + other})
+        assert _repair_escaped_marker(frame) is None
+
+    def test_a_bare_dumped_string_with_two_directives_is_refused(self):
+        # Recovery (1) has TWO branches and both must hold the same bar: the
+        # whole-text refusal that used to cover this one now guards only the
+        # line-based recovery, and ``peek`` reads the FIRST marker line.
+        other = sd.encode("monitor_start", {**MONITOR_ARGS, "idle_secs": 900}, "Armed: 900s.")
+        assert _repair_escaped_marker(json.dumps(_monitor() + "\n" + other)) is None
+
+    def test_a_bare_dumped_string_with_one_directive_is_recovered(self):
+        # The refusal above must not cost the branch its normal case.
+        repaired = _repair_escaped_marker(json.dumps(_monitor()))
+        assert repaired is not None
+        assert sd.peek(repaired) == ("monitor_start", MONITOR_ARGS)
+
+    def test_duplicated_frame_keeps_its_sibling_output(self):
+        # Recovery must not trade the rest of the frame for the marker.
+        frame = json.dumps({"response": _monitor(), "message": _monitor(), "note": CANARY})
+        repaired = _repair_escaped_marker(frame)
+        assert repaired is not None
+        assert sd.peek(repaired) == ("monitor_start", MONITOR_ARGS)
+        assert CANARY in repaired
+
+
+# One minimal payload per directive tool, in the shape that tool's own
+# ``_emit_directive`` call in ``mcp_tools/control.py`` builds. Keyed by kind so
+# the parametrised test below can assert coverage of every member of
+# ``sd.DIRECTIVE_TOOLS`` rather than of a hand-copied list.
+DIRECTIVE_PAYLOADS: dict[str, dict[str, object]] = {
+    "monitor_start": MONITOR_ARGS,
+    "monitor_watch": {
+        "kind": "github_pull_request",
+        "target": "https://github.com/o/r/pull/1",
+        "objective": "review_ready",
+        "cadence_secs": 300,
+        "max_runtime_secs": 7200,
+        "max_agent_turns": 4,
+        "max_tokens": 200000,
+        "max_provider_errors": 3,
+        "wake_instructions": "report the first red check",
+    },
+    "monitor_update": {"patch": {"message": "poll the PR", "idle_secs": 600}},
+    "monitor_stop": {"reason": "objective met"},
+    "autonudge_stop": {"reason": "done"},
+    "set_project": {"project": "/tmp/example-project", "clear": False},
+    "suggest_followup": {
+        "items": [{"title": "Add a test", "description": "cover the branch", "prompt": "do it"}]
+    },
+    "ask_question": {"questions": [{"question": "pick one", "options": [{"label": "a"}]}]},
+    # The tool emits an empty payload: a caller asking for a clean context always
+    # wants a clean one, so there is nothing to carry.
+    "reset_conversation": {},
+}
+
+
+class TestRecoveryIsKindAgnostic:
+    """The repair keys on the SENTINEL, never on the directive's kind, so every
+    member of ``sd.DIRECTIVE_TOOLS`` must survive the duplicating envelope.
+
+    Parametrised over the CONSTANT rather than a copied list, so a directive tool
+    added later is covered the moment it joins the frozenset — and fails loudly
+    here until someone gives it a payload. The five sibling tests above all carry
+    a ``monitor_start`` payload, which proves the fix for one kind and says
+    nothing about the other eight; this is the property that makes the fix
+    general instead of incidental.
+    """
+
+    @pytest.mark.parametrize("kind", sorted(sd.DIRECTIVE_TOOLS))
+    def test_every_directive_kind_survives_the_duplicating_envelope(self, kind):
+        args = DIRECTIVE_PAYLOADS.get(kind)
+        assert args is not None, (
+            "%s joined sd.DIRECTIVE_TOOLS with no payload in DIRECTIVE_PAYLOADS — "
+            "add its minimal args (the shape its own _emit_directive call builds) "
+            "so this kind is actually covered" % kind
+        )
+        marker = sd.encode(kind, args, "%s requested." % kind)
+        assert sd.peek(marker) == (kind, args), "fixture must start readable"
+        # The live KAS envelope: the result text copied into two fields, then the
+        # whole thing serialised.
+        frame = json.dumps({"response": marker, "imageBase64Urls": [], "message": marker})
+        assert frame.count(sd.SENTINEL) == 2
+        assert sd.peek(frame) is None, "the dump destroys the selector"
+        repaired = _repair_escaped_marker(frame)
+        assert repaired is not None, "%s was not recovered" % kind
+        assert sd.peek(repaired) == (kind, args)
+
+    @pytest.mark.parametrize("kind", sorted(sd.DIRECTIVE_TOOLS))
+    def test_every_directive_kind_survives_the_runtime_parser(self, kind):
+        # Through the real parser, which is the path a session actually takes.
+        marker = sd.encode(kind, DIRECTIVE_PAYLOADS[kind], "%s requested." % kind)
+        frame = json.dumps({"response": marker, "imageBase64Urls": [], "message": marker})
+        out = _runtime_output(_update(rawOutput={"items": [{"Json": {"stdout": frame}}]}))
+        assert sd.peek(out) == (kind, DIRECTIVE_PAYLOADS[kind])
 
 
 class TestSurvivesTheAcpClientParser:
