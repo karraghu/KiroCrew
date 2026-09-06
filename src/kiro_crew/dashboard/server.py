@@ -4109,10 +4109,21 @@ async def start_dashboard(
     await asyncio.to_thread(_apply_startup_yolo, state, cfg)
 
     # Wire safety override expiry notifications
-    def _on_override_expired(source: str) -> None:
-        """Notify all interfaces when safety override expires."""
-        state.broadcast_ws("yolo_expired", {"source": source})
-        state.push_slots_update()
+    def _clear_override_derived_trust(source: str) -> None:
+        """Drop every INHERITED grant of the expiring override. State only, no loop.
+
+        Split out of the notifier below because the two halves have different
+        deadlines. ``subagent_manager.admission.parent_trusted`` reads a session's
+        ``approval_policy == "auto"`` DIRECTLY -- it consults no flag in
+        ``safety_override`` -- so until this has run a spawn is auto-approved against
+        a ceiling that already denies, and an already-launched subagent is not
+        un-spawned by anything later. That makes this the half a policy revocation has
+        to complete synchronously, on whichever thread installed the ceiling, while
+        the broadcasts and DMs below can be scheduled onto the loop.
+
+        Safe off the event loop: it touches the slot dict and the session store and
+        nothing loop-affine. Idempotent, so the notifier re-running it costs nothing.
+        """
         # Slots carrying STANDING trust keep their policy: that is a separate,
         # longer-lived decision than the expiring override, and it is also what must
         # survive the channel-trust revoke below.
@@ -4120,7 +4131,14 @@ async def start_dashboard(
         if state.sessions is not None:
             from kiro_crew.dashboard.chat_utils import effective_session_key
 
-            for slot in state._slots.values():
+            # Snapshot the slots before iterating. This runs on whatever thread
+            # installed the denying ceiling, and the loop keeps creating and removing
+            # slots -- so iterating the live dict raises "dictionary changed size
+            # during iteration" and ABORTS the teardown partway, leaving the slots it
+            # had not reached yet at ``approval_policy="auto"`` with nothing to come
+            # back for them. A partial revocation is the failure this whole path
+            # exists to prevent, so the iteration cannot be the thing that breaks it.
+            for slot in list(state._slots.values()):
                 if slot._trust or slot._trust_reads:
                     # Excluded from the channel-trust revoke below, via the SAME
                     # derivation the reset uses: a channel-born slot's turns run on
@@ -4151,6 +4169,18 @@ async def start_dashboard(
             clear_trusted_sessions(keep_policy=standing_trust)
         except Exception:
             logger.debug("Could not clear trusted sessions", exc_info=True)
+
+    def _on_override_expired(source: str) -> None:
+        """Notify all interfaces when safety override expires.
+
+        Runs the inherited-trust teardown first so a TTL lapse -- which reaches this
+        directly, with no separate synchronous call -- still clears everything. A
+        policy revocation has already run it inline by the time this fires, and it is
+        idempotent, so the two paths need no branch between them.
+        """
+        _clear_override_derived_trust(source)
+        state.broadcast_ws("yolo_expired", {"source": source})
+        state.push_slots_update()
         # Slack notification (prevent GC with background_tasks set)
         _dispatch_override_expiry_notification(
             state, functools.partial(_notify_slack_override_expired, state), source
@@ -4160,6 +4190,9 @@ async def start_dashboard(
         _notify_unattended_expiry(state, source)
 
     safety_override().on_expired = _on_override_expired
+    # The synchronous half, for the one caller that cannot wait for the loop: a
+    # ceiling install that denies ``yolo`` revokes from whatever thread installed it.
+    safety_override().on_policy_revoked = _clear_override_derived_trust
 
     # A grant that was live when the process went down is GONE -- grants are
     # in-memory by design and this does not change that. What it changes is that
