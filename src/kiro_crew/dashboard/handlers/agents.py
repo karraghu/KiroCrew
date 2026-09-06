@@ -3086,7 +3086,12 @@ async def _do_agents_sync(request: web.Request) -> web.Response:
 
     if synced or pruned:
         try:
-            cfg.save()
+            # The caller (api_kirocrew_agents_sync) already holds
+            # _get_config_lock(), so run_config_write would deadlock re-acquiring
+            # it. save() takes the sidecar advisory flock (#4767), so the wait
+            # moves to a worker thread — same lock order run_config_write
+            # documents: asyncio lock first (held here), flock in the thread.
+            await asyncio.to_thread(cfg.save)
         except Exception:
             logger.warning("Failed to save config after agent sync", exc_info=True)
             try:
@@ -3457,7 +3462,10 @@ async def api_kirocrew_agents_create(request: web.Request) -> web.Response:
             session_color=session_color,
             avatar=avatar,
         )
-        cfg.save()
+        # Under _get_config_lock() (the async with above): offload so the
+        # sidecar flock save() now takes (#4767) waits in a worker thread,
+        # never on the event loop. Same order run_config_write documents.
+        await asyncio.to_thread(cfg.save)
     # A crew APPEARING changes what the effort chain resolves even with no pin of
     # its own: the factory's captured config does not know the crew, so it cannot
     # read the binding the role default keys on, and a scheduled or messaging

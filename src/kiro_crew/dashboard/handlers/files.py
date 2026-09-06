@@ -37,7 +37,7 @@ from kiro_crew.atomic_write import (
 from kiro_crew.config import loader as config_loader
 from kiro_crew.config.loader import KiroCrewConfig, WorkspaceConfig, config_dir, data_home
 from kiro_crew.dashboard import part_stream, upload_destination
-from kiro_crew.dashboard.chat_utils import dashboard_slot_key
+from kiro_crew.dashboard.chat_utils import dashboard_slot_key, run_config_write
 from kiro_crew.dashboard.file_index import _SKIP_DIRS as _WALK_SKIP_DIRS
 from kiro_crew.dashboard.handlers._shared import _probe_persisted_session, read_bounded_json
 from kiro_crew.dashboard.origin import is_direct_local_request
@@ -1675,7 +1675,10 @@ async def api_workspaces_create(request: web.Request) -> web.Response:
             {"error": "Cannot use config root as workspace directory"}, status=400
         )
     cfg.workspaces[name] = WorkspaceConfig(dir=ws_dir)
-    cfg.save()
+    # save() takes the sidecar advisory flock (#4767): offload so a contended
+    # lock waits in a worker thread, never on the event loop. run_config_write
+    # also holds the loop-side asyncio config lock, in the documented order.
+    await run_config_write(cfg.save)
     _sel().log_api_access(
         caller=request.get("user", "dashboard"),
         operation="workspace.create",
@@ -1754,7 +1757,8 @@ async def api_workspaces_update(request: web.Request) -> web.Response:
                 status=409,
             )
         cfg.workspaces[name].dir = new_dir
-    cfg.save()
+    # Offloaded for the same reason as workspace.create above (#4767).
+    await run_config_write(cfg.save)
     _sel().log_api_access(
         caller=request.get("user", "dashboard"),
         operation="workspace.update",
@@ -1791,7 +1795,8 @@ async def api_workspaces_delete(request: web.Request) -> web.Response:
             status=409,
         )
     del cfg.workspaces[name]
-    cfg.save()
+    # Offloaded for the same reason as workspace.create above (#4767).
+    await run_config_write(cfg.save)
     _sel().log_api_access(
         caller=request.get("user", "dashboard"),
         operation="workspace.delete",

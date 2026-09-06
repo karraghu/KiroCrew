@@ -26,6 +26,7 @@ from kiro_crew.config.loader import (
     config_path,
     update_config_locked,
 )
+from kiro_crew.dashboard.chat_utils import run_config_write
 from kiro_crew.dashboard.handlers._shared import read_capped_response
 from kiro_crew.dashboard.state import DashboardState, chat_message_frame
 from kiro_crew.executors import subprocess_executor
@@ -1761,12 +1762,18 @@ async def api_log_level(request: web.Request) -> web.Response:
     root.setLevel(_LOG_LEVELS[level_name])
     logger.info("Log level changed to %s via dashboard", level_name)
 
-    # Persist to config so the level survives restarts.
-    persisted = False
-    try:
+    # Persist to config so the level survives restarts. save() takes the
+    # sidecar advisory flock (#4767), so it must not run inline on the event
+    # loop; run_config_write holds the loop-side asyncio config lock and runs
+    # the whole load-mutate-save off-loop, in the documented lock order.
+    def _persist_level() -> None:
         cfg = KiroCrewConfig.load()
         cfg.agent.log_level = level_name
         cfg.save()
+
+    persisted = False
+    try:
+        await run_config_write(_persist_level)
         persisted = True
     except Exception:
         logger.warning("Failed to persist log level to config", exc_info=True)
