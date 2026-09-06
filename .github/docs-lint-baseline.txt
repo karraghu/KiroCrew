@@ -2,16 +2,21 @@
 # already present when each fact check shipped. A triple listed here passes; a
 # triple that is NOT listed fails the gate.
 #
-# Do NOT add a line here to make a red gate green. A new triple means the doc
+# Do NOT hand-edit a line in to make a red gate green. A new triple means the doc
 # needs the fix the check names -- cite a symbol instead of a line, correct the
-# path, split the glued row, record the coupling. The refresh below only deletes
-# lines, so it cannot add one for you.
+# path, split the glued row, record the coupling.
 #
-# Refresh (after fixing something listed here):
+# Refresh (after fixing something listed here). Prune-only: it intersects, so it
+# cannot record a triple, and it refuses to run if this file is missing.
 #   python3 scripts/docs_lint.py --update-baseline
+#
+# Adding is a separate, louder verb. It prints every triple it accepts, because
+# each one is an exemption a reviewer has to agree with:
+#   python3 scripts/docs_lint.py --accept-new
 #
 # Format: <check-id>\t<path>\t<token>
 dead-identifier	AGENTS.md	aim_agents
+dead-identifier	CONTRIBUTING.md	TestFeatureName
 dead-identifier	docs/app-kit/api-reference.md	MemoryResult
 dead-identifier	docs/app-kit/api-reference.md	SlotInfo
 dead-identifier	docs/app-kit/api-reference.md	SubagentResult
@@ -81,25 +86,20 @@ dead-identifier	docs/app-kit/getting-started.md	AimBadge
 dead-identifier	docs/app-kit/getting-started.md	verifyProxyRequest
 dead-identifier	docs/app-kit/manifest-reference.md	FeatureCard
 dead-identifier	docs/architecture/design-notes/mcp-gateway-oversize-response.md	unix_timestamp
-dead-identifier	docs/architecture/design-notes/oversized-image-session-wedge.md	deviceScaleFactor
 dead-identifier	docs/architecture/design-notes/soft-stop.md	should_recover_from_refusal
 dead-identifier	docs/architecture/mcp.md	computer_call
 dead-identifier	docs/build/desktop-app.md	LocalNetwork
 dead-identifier	docs/build/desktop-app.md	customInstall
 dead-identifier	docs/build/desktop-app.md	entitlementsInherit
-dead-identifier	docs/build/desktop-app.md	findKirocrewBin
 dead-identifier	docs/build/desktop-app.md	getMediaAccessStatus
 dead-identifier	docs/build/desktop-app.md	hardenedRuntime
 dead-identifier	docs/build/desktop-app.md	perMachine
-dead-identifier	docs/build/desktop-app.md	resourcesPath
 dead-identifier	docs/build/desktop-app.md	runAfterFinish
 dead-identifier	docs/build/desktop-app.md	setWindowButtonVisibility
 dead-identifier	docs/build/desktop-app.md	showMicPermissionDialog
-dead-identifier	docs/build/desktop-app.md	stdlib_probe_gate
 dead-identifier	docs/build/desktop-app.md	x64ArchFiles
 dead-identifier	docs/build/release.md	DebUpdater
 dead-identifier	docs/build/release.md	GetPublicKey
-dead-identifier	docs/build/release.md	PreconditionFailed
 dead-identifier	docs/build/release.md	RpmUpdater
 dead-identifier	docs/build/release.md	SetSilent
 dead-identifier	docs/build/release.md	StartApp
@@ -107,45 +107,23 @@ dead-identifier	docs/build/release.md	allowDowngrade
 dead-identifier	docs/build/release.md	allowPrerelease
 dead-identifier	docs/build/release.md	autoDownloadUpdates
 dead-identifier	docs/build/release.md	autoInstallOnAppQuit
-dead-identifier	docs/build/release.md	autoUpdater
 dead-identifier	docs/build/release.md	canUpdateLinuxInstall
 dead-identifier	docs/build/release.md	checkForUpdates
 dead-identifier	docs/build/release.md	feedBase
 dead-identifier	docs/build/release.md	isForceRunAfter
-dead-identifier	docs/build/release.md	oneClick
 dead-identifier	docs/build/release.md	quitAndInstall
-dead-identifier	docs/build/release.md	repository_owner
 dead-identifier	docs/build/release.md	resolveLinuxInstall
 dead-identifier	docs/build/release.md	startDownload
-dead-identifier	docs/build/release.md	write_feed
 dead-identifier	docs/build/signing-runbook.md	KiroCrewNotary
-dead-identifier	docs/build/signing-runbook.md	LoginItems
-dead-identifier	docs/build/signing-runbook.md	PreconditionFailed
-dead-identifier	docs/build/signing-runbook.md	apple_id
-dead-identifier	docs/build/signing-runbook.md	chrome_crashpad_handler
-dead-identifier	docs/build/signing-runbook.md	collect_entries
-dead-identifier	docs/build/signing-runbook.md	collect_shell_entries
-dead-identifier	docs/build/signing-runbook.md	embedded_requirements
-dead-identifier	docs/build/signing-runbook.md	extendInfo
-dead-identifier	docs/build/signing-runbook.md	syspolicy_check
-dead-identifier	docs/build/signing-runbook.md	validate_layout
-dead-identifier	docs/ci/ci-and-reviews.md	autoUpdater
-dead-identifier	docs/ci/ci-and-reviews.md	execution_file
-dead-identifier	docs/ci/e2e-gate.md	storageState
 dead-identifier	docs/ci/e2e-gate.md	webServer
-dead-identifier	docs/ci/i18n-gates.md	assertPseudoActive
 dead-identifier	docs/guides/connecting-remote-oauth-mcp-server.md	redirectUri
 dead-identifier	docs/guides/docker-troubleshooting.md	initialDelaySeconds
 dead-identifier	docs/guides/docker-troubleshooting.md	livenessProbe
 dead-identifier	docs/guides/install.md	deleteAppDataOnUninstall
-dead-identifier	docs/guides/install.md	oneClick
 dead-identifier	docs/guides/windows-install.md	CopyFiles
 dead-identifier	docs/guides/windows-install.md	TestWin32StructsAreModuleScoped
-dead-identifier	docs/guides/windows-install.md	UninstAppUserModelId
-dead-identifier	docs/guides/windows-install.md	WinShell
 dead-identifier	docs/guides/windows-install.md	customUnInstall
 dead-identifier	docs/guides/windows-install.md	deleteAppDataOnUninstall
-dead-identifier	docs/guides/windows-install.md	oneClick
 dead-identifier	docs/guides/windows-install.md	perMachine
 dead-identifier	docs/guides/windows-install.md	quitAndInstall
 dead-identifier	docs/reference/kiro-cli/chat/voice.md	SynthesizeSpeech
@@ -188,7 +166,6 @@ dead-identifier	docs/system-specs/modules/acp-client.md	seal_memfd
 dead-identifier	docs/system-specs/modules/app-kit-platform.md	EditorialAssets
 dead-identifier	docs/system-specs/modules/artifacts.md	path_safe
 dead-identifier	docs/system-specs/modules/artifacts.md	refresh_binding
-dead-identifier	docs/system-specs/modules/auto-improvement-test-plan.md	is_repetition
 dead-identifier	docs/system-specs/modules/auto-improvement-test-plan.md	major_outage
 dead-identifier	docs/system-specs/modules/auto-improvement-test-plan.md	mod_py_sym
 dead-identifier	docs/system-specs/modules/auto-improvement-test-plan.md	negamay_root
@@ -271,7 +248,6 @@ dead-identifier	docs/system-specs/modules/metrics.md	DailyActiveInstances
 dead-identifier	docs/system-specs/modules/metrics.md	NewInstallations
 dead-identifier	docs/system-specs/modules/metrics.md	PutMetricData
 dead-identifier	docs/system-specs/modules/metrics.md	beacon_daily
-dead-identifier	docs/system-specs/modules/metrics.md	build_backend
 dead-identifier	docs/system-specs/modules/metrics.md	kirocrew_analytics
 dead-identifier	docs/system-specs/modules/metrics.md	recordFields
 dead-identifier	docs/system-specs/modules/metrics.md	zero_count
@@ -328,19 +304,17 @@ dead-identifier	docs/system-specs/modules/taskrunner.md	PixelCanvasWidget
 dead-identifier	docs/system-specs/modules/taskrunner.md	ProjectAnimation
 dead-identifier	docs/system-specs/modules/taskrunner.md	SubAgentActivity
 dead-identifier	docs/system-specs/modules/taskrunner.md	spec_stem
-dead-identifier	website/docs/extension-seams.md	emitFile
+dead-identifier	src/kiro_crew/docs/configuration.md	legal_precedents
+dead-identifier	src/kiro_crew/docs/dynamic-subagent-sizing.md	effective_available
+dead-identifier	src/kiro_crew/docs/feishu-integration.md	send_as_bot
+dead-identifier	src/kiro_crew/docs/mcp-apps.md	HostContext
 dead-identifier	website/docs/extension-seams.md	registerThemee
 dead-identifier	website/docs/frontend-conventions.md	darkMode
 dead-identifier	website/docs/i18n-catalog.md	installReceipt
-dead-identifier	website/docs/i18n-catalog.md	pathPrefix
 dead-identifier	website/docs/page-layout.md	ActionBar
 dead-identifier	website/docs/testing.md	CronNotificationButtons
-dead-identifier	website/docs/testing.md	storageState
 dead-identifier	website/docs/testing.md	webServer
-dead-identifier	website/docs/theming-contract.md	MonacoCodeBlock
 dead-identifier	website/docs/theming-contract.md	TestThemeVarsFilter
-fenced-path	src/kiro_crew/docs/task-runner.md	docs/task-specs/2026/03/my-task/spec.md
-fenced-path	src/kiro_crew/docs/use-cases.md	docs/task-specs/backlog-crusher.md
 line-ref	docs/architecture/design-notes/memory-benchmarks.md	vector_memory.py:1126
 line-ref	docs/architecture/design-notes/memory-benchmarks.md	vector_memory.py:1448
 line-ref	docs/architecture/overview.md	src/kiro_crew/apps/admission.py:25-30
@@ -914,10 +888,5 @@ line-ref	docs/task-specs/2026/09/task-fleet-probe-coverage-investigation/analysi
 line-ref	docs/task-specs/2026/09/task-fleet-probe-coverage-investigation/analysis.md	test/test_pipeline_conductor_agent.py:181
 line-ref	docs/task-specs/2026/09/task-fleet-probe-coverage-investigation/analysis.md	test/test_pipeline_conductor_agent.py:26
 line-ref	docs/task-specs/2026/09/task-fleet-probe-coverage-investigation/analysis.md	test/test_pipeline_conductor_agent.py:453
-path-exists	docs/ci/ci-and-reviews.md	scripts/vendor_manifest.sh
 path-exists	docs/reference/kiro-cli/mcp/oauth-token-storage.md	docs/design/mcp-oauth-ownership-problem.md
-path-exists	docs/system-specs/modules/auto-improvement-test-plan.md	src/board.py
-path-exists	docs/system-specs/modules/auto-improvement-test-plan.md	src/m.py
-path-exists	docs/system-specs/modules/auto-improvement-test-plan.md	src/pkg/sub/mod.py
-path-exists	docs/system-specs/modules/auto-improvement-test-plan.md	src/search.py
 table-row-merge	docs/system-specs/features/README.md	app-notifications.md

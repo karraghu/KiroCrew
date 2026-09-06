@@ -198,11 +198,48 @@ Widening that is a separate decision from moving the gates.
 | `loop-bound-locks` | `scripts/check_loop_bound_locks.py`, self-test first. Fails on any module-global `asyncio.Lock()`/`Event()`/`Queue()` declaration — those bind to the import-time (or first-use) event loop and raise `RuntimeError` when acquired from another loop (Python 3.10+). #4800 converted the tree to `kiro_crew.loop_lock.LoopBoundLock`; whole-tree, since the backlog is zero |
 | `testpaths-coverage` | `scripts/check_testpaths_coverage.py`, self-test first. Fails on a `test_*.py` file outside the roots `setup.cfg` pins in `testpaths` — such a file is never collected, so it is green by omission and rots against the code it claims to cover (#6577 found twelve). Whole-tree, since the backlog is zero |
 | `harness-parity` | `scripts/check_harness_parity.py`, self-test first. Fails on a newly added line that expresses "this is the Kiro harness" as the absence of another one — a shape that fails toward the permissive answer, so nothing else goes red. Diff-scoped; the whole-tree backlog is a non-failing report |
-| `docs-lint` | `scripts/docs_lint.py --test` then `scripts/docs-lint.sh`. Every internal link resolves, every doc is reachable from its directory index, every directory holding docs has one, no code comment cites a doc that does not exist, no doc cites a source LINE past the end of the file it names, no module spec names a source file that exists nowhere, and no doc whose filename is hardcoded in code has been renamed out from under its consumer |
+| `docs-lint` | `scripts/docs_lint.py --test` then `scripts/docs-lint.sh`. Every internal link resolves, every doc is reachable from its directory index, every directory holding docs has one, no code comment cites a doc that does not exist, no doc cites a source LINE past the end of the file it names, no module spec names a source file that exists nowhere, and no doc whose filename is hardcoded in code has been renamed out from under its consumer. Plus the fact checks below, behind a shrink-only baseline |
 
 Each of these runs its own self-test in the same step, ahead of the real check. A
 gate that has silently stopped matching reads as a green signal, which is worse than
 no gate, so every rule is exercised against a planted probe first.
+
+### `docs-lint`'s fact checks sit behind a shrink-only baseline
+
+The structural docs checks hold at zero and fail outright. A second family inside
+the same gate asks whether a sentence is still TRUE of the code, and that question
+has a backlog, so its findings are `(check-id, path, token)` triples matched
+against [`.github/docs-lint-baseline.txt`](../../.github/docs-lint-baseline.txt).
+A listed triple passes; an unlisted one fails.
+
+| Check | What fails |
+|---|---|
+| `path-exists` | A backticked repo-anchored source path (`src/**.py`, `scripts/*.py\|.sh`, `website/src/**.ts\|.tsx`, `.github/workflows/*.yml`, `docs/**/*.md`) that names no file. Written from the repo root, so it resolves or the doc is wrong — the suffix index is still a fallback, because a skill's own `scripts/` is one root down. A `path::Symbol` coordinate stays checked, since this repo addresses its own code that way too; only the docs describing a run against another repository are exempt |
+| `line-ref` | A `file.py:NNN` citation anywhere in prose. The beyond-EOF check catches the citation that already rotted; this catches the one that rots on the next refactor with nothing going red. Cite a symbol name instead |
+| `fenced-path` | A `docs/task-specs/**/*.md` path or a `kirocrew run` argument inside a fenced block that names no file. A fence is a sample everywhere else, but a reader PASTES these two |
+| `table-row-merge` | Two index rows glued onto one physical line. Both links resolve, so every link-graph check stays green while the table renders one row short and a file loses its entry |
+| `code-coupled-completeness` | A packaged doc named in a string literal under `website/src` and absent from `CODE_COUPLED_DOCS`. An unrecorded coupling can be renamed apart silently |
+| `dead-identifier` | A backticked identifier absent from every first-party code tree. **Report-only** unless `--strict-identifiers`, because the class mixes real rot with names the repo cannot adjudicate |
+
+Three checks skip a doc whose genre names things that do not exist yet
+(`docs/request-for-change/`, `docs/superpowers/plans/`, `docs/task-specs/`,
+`docs/design/`): `path-exists`, `fenced-path` and `dead-identifier`. A proposal
+names a file or a symbol precisely BECAUSE it is not there yet. `fenced-path` also
+skips the packaged user docs under `src/kiro_crew/docs/`, where a task-spec path is
+a template for the reader's own project rather than a file in this checkout.
+
+`python3 scripts/docs_lint.py --update-baseline` prunes the list, and it is
+prune-only by construction: it intersects the recorded triples with the ones firing
+now, so it cannot record one, and it refuses to run when the file is missing —
+read as an empty set, one `rm` plus one refresh would accept every current
+violation forever. Adding is the separate `--accept-new`, which prints every triple
+it records so each exemption lands in a diff a reviewer reads. That is the same
+posture `check_black_formatting.py` takes.
+
+A triple that no longer fires is **reported, not fatal**. That is a concession to
+several changes consolidating the doc trees at once, so an entry graduates in a file
+the current change never touched; it is not a claim that a triple is fragile, since
+the recorded identity omits the line number and a reflow keeps it.
 
 ## `ci.yml`: correctness
 

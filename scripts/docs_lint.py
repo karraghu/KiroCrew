@@ -73,16 +73,19 @@ answer on a repository this size is "mostly, with a recorded backlog":
 
 Every fact-check finding is a ``(check-id, path, token)`` triple, and the triples
 already present when the family shipped live in ``.github/docs-lint-baseline.txt``.
-A baselined triple passes; a new one fails. ``--update-baseline`` only ever
-DELETES lines (it seeds the file when it is absent and prunes it when it is not),
-so a new finding can never be silenced by refreshing -- the same rule that keeps
-``scripts/check_black_formatting.py`` honest, and for the same reason.
+A baselined triple passes; a new one fails. Two operations touch that file and they
+are deliberately different verbs: ``--update-baseline`` intersects and can therefore
+only DELETE lines, and ``--accept-new`` is the one path that adds, which prints every
+triple it records so the exemption lands in a diff a reviewer reads. A MISSING
+baseline is an error, not an empty set -- read as empty, one ``rm`` plus one refresh
+would accept every current violation forever. Same rule, and the same reason, as
+``scripts/check_black_formatting.py``.
 
-A triple that no longer fires is reported but does not fail, which is where this
-gate deliberately parts company with the black ratchet. A fact triple is
-line-precise, so reflowing a paragraph graduates entries in files the change
-never touched; failing there would redden unrelated docs PRs. The list still
-cannot grow, so it still only shrinks.
+A triple that no longer fires is reported but does not fail. That is a concession to
+this repository's doc trees being consolidated by several changes at once, so an
+entry graduates in a file the current change never touched -- not a claim that a
+triple is fragile, since ``FactFinding.key`` omits the line number so a reflow keeps
+the same identity.
 """
 
 from __future__ import annotations
@@ -400,6 +403,9 @@ _CODE_REF_IGNORE_PATH_PARTS: tuple[str, ...] = (
     # This linter documents the paths it couples to and plants deliberately
     # missing ones in its self-test; scanning itself would report both as real.
     "scripts/docs_lint.py",
+    # Its unit tests plant the same missing paths as fixture data, for the same
+    # reason: a check cannot be proven to fire without a defect to fire on.
+    "test/test_docs_lint_fact_checks.py",
 )
 
 # A doc path is a CITATION when it appears in a comment or docstring, and DATA when
@@ -425,6 +431,13 @@ _CHANGELOG_LINE_RE = re.compile(
 )
 # How far into a doc a changelog preamble can hide before the first section.
 _PREAMBLE_SCAN_LINES = 40
+
+# How many items one report section prints before it says "and N more". A gate
+# whose output is longer than the screen is a gate nobody reads to the end.
+_MAX_REPORTED_FINDINGS = 40
+# Lower for the two report-only sections: they are a nudge, not the verdict.
+_MAX_REPORTED_ADVISORIES = 40
+_MAX_REPORTED_STALE = 20
 
 
 # ── Fact checks: identifiers, shapes and scope ─────────────────────────────────
@@ -452,10 +465,15 @@ _FORWARD_LOOKING_DOC_PREFIXES: tuple[str, ...] = (
     "docs/design/",
 )
 
-# A source path written from the REPO ROOT, so it resolves or it is wrong. The
-# lookbehind is what keeps the ``docs/`` and ``src/`` arms from matching the tail
-# of a longer path: without it ``src/kiro_crew/docs/tips.md`` would also be read
-# as a repo-root ``docs/tips.md`` and reported for not existing there.
+# A source path written from the REPO ROOT, so it resolves or it is wrong. Both
+# boundaries are load-bearing. The lookBEHIND keeps the ``docs/`` and ``src/`` arms
+# from matching the tail of a longer path: without it
+# ``src/kiro_crew/docs/tips.md`` would also be read as a repo-root
+# ``docs/tips.md``. The lookAHEAD keeps the extension from being a PREFIX of the
+# real one: without it ``scripts/vendor_manifest.sha256`` reads as
+# ``scripts/vendor_manifest.sh``, ``types.pyi`` as ``types.py``, ``page.mdx`` as
+# ``page.md`` and ``a.tsx.snap`` as ``a.tsx`` -- four correct citations reported as
+# rot. ``:`` stays admissible so ``src/x.py:12`` is still seen by the line check.
 _REPO_PATH_CITE_RE = re.compile(
     r"(?<![A-Za-z0-9_./-])(?:"
     r"src/[A-Za-z0-9_][A-Za-z0-9_./-]*\.py"
@@ -463,7 +481,23 @@ _REPO_PATH_CITE_RE = re.compile(
     r"|website/src/[A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:tsx|ts)"
     r"|\.github/workflows/[A-Za-z0-9_][A-Za-z0-9_.-]*\.ya?ml"
     r"|docs/[A-Za-z0-9_][A-Za-z0-9_./-]*\.md"
-    r")"
+    r")(?![A-Za-z0-9_.-])"
+)
+# A path followed by ``::`` is a COORDINATE -- ``src/board.py::is_repetition`` is the
+# address format the auto-improvement spine hands an EXTERNAL target repository, so
+# the path names a module in that repo. The syntax alone cannot say which repo is
+# meant: this one uses it for its own code too
+# (``src/kiro_crew/mcp_tools/workflows.py::workflow_run``), and skipping on syntax
+# would let a rename leave every such local citation stale with the gate green.
+# What separates them is the DOCUMENT, the same discriminator
+# ``_PATH_CITE_DOC_PREFIXES`` already runs on: these docs describe a run against
+# another repository, so a coordinate in them is not a claim about this tree.
+_COORDINATE_SUFFIX = "::"
+_EXTERNAL_TARGET_COORDINATE_DOCS: frozenset[str] = frozenset(
+    {
+        "docs/system-specs/modules/auto-improvement-test-plan.md",
+        "docs/system-specs/modules/auto-improvement.md",
+    }
 )
 # Inline code with its content captured; ``_INLINE_CODE_RE`` above blanks spans
 # and deliberately captures nothing.
@@ -474,8 +508,11 @@ _INLINE_CODE_SPAN_RE = re.compile(r"`+([^`\n]*)`+")
 _FENCED_TASK_SPEC_RE = re.compile(r"(?<![A-Za-z0-9_./-])docs/task-specs/[A-Za-z0-9_./-]*\.md")
 _KIROCREW_RUN_RE = re.compile(r"kirocrew\s+run\s+(?:-[^\s]*\s+)*([A-Za-z0-9_][A-Za-z0-9_./-]*)")
 
-# A markdown table's delimiter row, which is what fixes the table's width.
-_TABLE_DELIMITER_RE = re.compile(r"^\s*\|[\s|:.-]+\|?\s*$")
+# A markdown table's delimiter row, which is what fixes the table's width. Only
+# the three characters a delimiter row is made of: admitting ``.`` would let a
+# ``| ... | ... |`` continuation row silently redefine the width the glued-row
+# check compares against.
+_TABLE_DELIMITER_RE = re.compile(r"^\s*\|[\s|:-]+\|?\s*$")
 # A cell whose content opens with a link.
 _TABLE_LINK_CELL_RE = re.compile(r"\|\s*\[")
 
@@ -496,13 +533,28 @@ _COUPLING_AMBIGUOUS_NAMES: frozenset[str] = frozenset({"README.md"})
 # Backticked identifiers, and the trees that decide whether one is alive. Every
 # first-party tree is searched, so "dead" means dead repo-wide: restricting the
 # corpus to src/, website/src and scripts/ marks `test_all_exports_exact` dead
-# (it lives in test/) and `KiroCrewClient` dead (it lives in packages/).
+# (it lives in test/) and `KiroCrewClient` dead (it lives in packages/). The tail
+# of the list mirrors `_SOURCE_CITE_TREES`, because a symbol defined only in a
+# workflow or in `website/scripts/` is alive and would otherwise read as dead.
 _IDENT_SNAKE_RE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
 _IDENT_CAMEL_RE = re.compile(r"\b[A-Za-z][a-z0-9]*(?:[A-Z][a-z0-9]+)+\b")
 _IDENT_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
 # Shorter than this and the token is a word, not a symbol.
 _IDENT_MIN_LEN = 8
-_IDENT_CODE_TREES: tuple[str, ...] = ("src", "website/src", "scripts", "test", "packages")
+_IDENT_CODE_TREES: tuple[str, ...] = (
+    "src",
+    "website/src",
+    "website/scripts",
+    "scripts",
+    "test",
+    "packages",
+    "packaging",
+    "site",
+    ".github",
+)
+# Markdown and plain text are deliberately ABSENT. Documentation is what this
+# check is auditing, so counting a doc as a definition lets one stale page keep a
+# renamed symbol "alive" for every other page -- exactly the rot being hunted.
 _IDENT_CODE_SUFFIXES: frozenset[str] = frozenset(
     {
         ".py",
@@ -522,8 +574,6 @@ _IDENT_CODE_SUFFIXES: frozenset[str] = frozenset(
         ".scss",
         ".html",
         ".sql",
-        ".md",
-        ".txt",
     }
 )
 # Names a doc writes to mean "your thing here"; absence is the intent.
@@ -1255,10 +1305,19 @@ def check_cited_paths(root: Path, docs: list[Path], findings: Findings) -> None:
             text = _read(doc)
         except OSError:
             continue
+        external_coordinates = rel_doc in _EXTERNAL_TARGET_COORDINATE_DOCS
         for _lineno, code in _iter_code_spans(text):
             for match in _REPO_PATH_CITE_RE.finditer(code):
                 ref = match.group(0)
                 if (root / ref).exists() or _resolve_source_cite(root, ref):
+                    continue
+                if (
+                    external_coordinates
+                    and code[match.end() : match.end() + 2] == _COORDINATE_SUFFIX
+                ):
+                    # A coordinate in a doc about a run against ANOTHER repository
+                    # addresses a module there. Elsewhere the same syntax names local
+                    # code, so the path stays checked and a rename still reddens.
                     continue
                 findings.facts.append(FactFinding(CHECK_PATH_EXISTS, rel_doc, ref))
 
@@ -1268,14 +1327,22 @@ def check_fenced_paths(root: Path, docs: list[Path], findings: Findings) -> None
 
     A fenced block is a sample and is exempt everywhere else, which is right for a
     listing a reader only reads. It is wrong for the two shapes a reader PASTES: a
-    ``docs/task-specs/...md`` path and the argument of ``kirocrew run``. Both go
+    ``docs/task-specs/...`` path and the argument of ``kirocrew run``. Both go
     straight into a command, so a dead one fails in the reader's terminal.
 
-    A bare filename is skipped: ``kirocrew run TASK.md`` names a file the reader
-    creates, and only a path with a directory component is a claim about this tree.
+    Three exemptions, each because the path names a file that is not this
+    repository's to have. A bare filename is the reader's own
+    (``kirocrew run TASK.md``), so only a path WITH a directory component is a
+    checkable claim. A forward-looking genre names its own planned output, the same
+    judgement ``check_cited_paths`` runs on. And the PACKAGED user docs teach a
+    reader to write their OWN task spec, so ``docs/task-specs/my-task/spec.md``
+    there is a template for their project rather than a file in this checkout --
+    "correct the path" is not even an available fix for it.
     """
     for doc in docs:
         rel_doc = _rel(doc, root)
+        if _is_forward_looking(rel_doc) or rel_doc.startswith(f"{_PACKAGED_DOCS_DIR}/"):
+            continue
         try:
             text = _read(doc)
         except OSError:
@@ -1283,7 +1350,9 @@ def check_fenced_paths(root: Path, docs: list[Path], findings: Findings) -> None
         for _lineno, line in _iter_fenced_lines(text):
             tokens = [m.group(0) for m in _FENCED_TASK_SPEC_RE.finditer(line)]
             tokens += [m.group(1) for m in _KIROCREW_RUN_RE.finditer(line)]
-            for token in tokens:
+            # Both patterns match a `kirocrew run docs/task-specs/...` line, and one
+            # pasted command is one finding.
+            for token in dict.fromkeys(tokens):
                 if "/" not in token or (root / token).exists():
                     continue
                 findings.facts.append(FactFinding(CHECK_FENCED_PATH, rel_doc, token))
@@ -1381,9 +1450,7 @@ def check_coupling_completeness(root: Path, findings: Findings) -> None:
         return
     packaged = {p.name for p in packaged_dir.glob("*.md") if _is_regular_file(p)}
     recorded = {
-        Path(doc).name
-        for doc in CODE_COUPLED_DOCS
-        if doc.startswith(f"{_PACKAGED_DOCS_DIR}/")
+        Path(doc).name for doc in CODE_COUPLED_DOCS if doc.startswith(f"{_PACKAGED_DOCS_DIR}/")
     }
     base = root / _COUPLING_SCAN_ROOT
     if not base.is_dir():
@@ -1457,9 +1524,7 @@ def check_dead_identifiers(root: Path, docs: list[Path], findings: Findings) -> 
                         continue
                     if token in live:
                         continue
-                    findings.advisories.append(
-                        FactFinding(CHECK_DEAD_IDENTIFIER, rel_doc, token)
-                    )
+                    findings.advisories.append(FactFinding(CHECK_DEAD_IDENTIFIER, rel_doc, token))
 
 
 # ── Baseline ───────────────────────────────────────────────────────────────────
@@ -1469,22 +1534,44 @@ _BASELINE_HEADER = """\
 # already present when each fact check shipped. A triple listed here passes; a
 # triple that is NOT listed fails the gate.
 #
-# Do NOT add a line here to make a red gate green. A new triple means the doc
+# Do NOT hand-edit a line in to make a red gate green. A new triple means the doc
 # needs the fix the check names -- cite a symbol instead of a line, correct the
-# path, split the glued row, record the coupling. The refresh below only deletes
-# lines, so it cannot add one for you.
+# path, split the glued row, record the coupling.
 #
-# Refresh (after fixing something listed here):
+# Refresh (after fixing something listed here). Prune-only: it intersects, so it
+# cannot record a triple, and it refuses to run if this file is missing.
 #   python3 scripts/docs_lint.py --update-baseline
+#
+# Adding is a separate, louder verb. It prints every triple it accepts, because
+# each one is an exemption a reviewer has to agree with:
+#   python3 scripts/docs_lint.py --accept-new
 #
 # Format: <check-id>\\t<path>\\t<token>
 """
 
 
 def _read_baseline(path: Path) -> set[tuple[str, str, str]]:
-    """The recorded triples, or an empty set when the file does not exist yet."""
-    if not path.is_file():
-        return set()
+    """The recorded triples. A MISSING file is an error, never an empty set.
+
+    An absent baseline read as "nothing is exempt" sounds strict and is the
+    opposite: the refresh would then have nothing to intersect against, so one
+    ``rm`` plus one refresh would record every current violation as permanently
+    accepted. Failing here is what makes the file's own "do NOT add a line"
+    a rule rather than prose, and it is the posture
+    ``scripts/check_black_formatting.py`` takes for the same reason.
+
+    A SYMLINKED baseline is refused for the same reason ``_is_regular_file``
+    refuses one anywhere else in this gate: the tree being linted is a tree a fork
+    PR controls, so a committed symlink here aims both the read and the documented
+    refresh at a file of the fork's choosing.
+    """
+    if not _is_regular_file(path):
+        raise SystemExit(
+            f"docs-lint: baseline {path} is missing or is not a regular file; restore "
+            "it from git rather than regenerating it. A regenerated baseline would "
+            "silently accept every violation added since it was recorded, and a "
+            "symlink here would aim the refresh at whatever it points to."
+        )
     recorded: set[tuple[str, str, str]] = set()
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
@@ -1497,9 +1584,36 @@ def _read_baseline(path: Path) -> set[tuple[str, str, str]]:
 
 
 def _write_baseline(path: Path, triples: set[tuple[str, str, str]]) -> None:
+    """Publish the baseline, refusing a symlinked destination.
+
+    ``Path.write_text`` FOLLOWS a symlink, so a committed link at the baseline path
+    turns the documented ``--update-baseline`` into an overwrite of whatever it
+    points at, run by a maintainer on their own machine. Two guards, because the
+    first alone is a check-then-write race: the ``lstat`` refusal gives the
+    actionable message, and ``O_NOFOLLOW`` on the staged temp plus a rename is what
+    the kernel enforces. Staging and renaming also means an interrupted refresh
+    leaves the recorded backlog intact rather than truncated.
+
+    ``kiro_crew.atomic_write`` is the repo's helper for this shape and is not used
+    here on purpose: this gate is stdlib-only so it runs before the package is
+    installed, which is how CI invokes it.
+    """
+    if path.is_symlink():
+        raise SystemExit(
+            f"docs-lint: refusing to write the baseline through the symlink {path}; "
+            "the write would land at the link's target. Replace it with a real file."
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     body = "".join("\t".join(triple) + "\n" for triple in sorted(triples))
-    path.write_text(_BASELINE_HEADER + body, encoding="utf-8")
+    data = (_BASELINE_HEADER + body).encode("utf-8")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(tmp, flags, 0o644)
+    try:
+        os.write(fd, data)
+    finally:
+        os.close(fd)
+    os.replace(tmp, path)
 
 
 def apply_baseline(
@@ -1508,9 +1622,16 @@ def apply_baseline(
     """Drop baselined triples from ``findings``; return the ones that no longer fire.
 
     Mutates in place so the caller keeps one ``Findings``. The return value is the
-    prune list -- reported, never fatal, because a fact triple is line-precise and
-    a reflow elsewhere in the repo graduates entries in files this change never
-    touched.
+    prune list, and it is REPORTED rather than fatal for one reason only: this
+    repository's doc trees are being consolidated by several changes at once, so a
+    triple graduates in a file the current change never touched. It is not because
+    a triple is fragile -- ``FactFinding.key`` excludes the line number precisely so
+    a reflow keeps the same identity.
+
+    That leaves one window worth naming: a triple fixed without pruning its entry
+    can be reintroduced silently. ``--update-baseline`` closes it, and the file
+    cannot grow without ``--accept-new``, so the window narrows every time anyone
+    refreshes.
     """
     seen = {f.key for f in findings.facts} | {f.key for f in findings.advisories}
     findings.facts = [f for f in findings.facts if f.key not in recorded]
@@ -1525,10 +1646,10 @@ def _emit(title: str, items: list[str], hint: str) -> None:
     if not items:
         return
     print(f"\nFAIL: {title} ({len(items)})")
-    for item in items[:40]:
+    for item in items[:_MAX_REPORTED_FINDINGS]:
         print(f"  - {item}")
-    if len(items) > 40:
-        print(f"  ... and {len(items) - 40} more")
+    if len(items) > _MAX_REPORTED_FINDINGS:
+        print(f"  ... and {len(items) - _MAX_REPORTED_FINDINGS} more")
     print(f"  -> {hint}")
 
 
@@ -1655,17 +1776,17 @@ def _report(findings: Findings, doc_count: int, stale_baseline: list[tuple[str, 
     )
     if findings.advisories:
         print(f"\nreport-only: {len(findings.advisories)} dead identifier(s) outside the baseline")
-        for item in findings.advisories[:40]:
+        for item in findings.advisories[:_MAX_REPORTED_ADVISORIES]:
             print(f"  - {item.render()}")
-        if len(findings.advisories) > 40:
-            print(f"  ... and {len(findings.advisories) - 40} more")
+        if len(findings.advisories) > _MAX_REPORTED_ADVISORIES:
+            print(f"  ... and {len(findings.advisories) - _MAX_REPORTED_ADVISORIES} more")
         print("  -> rename to the live symbol, or run with --strict-identifiers to fail on these")
     if stale_baseline:
         print(f"\nreport-only: {len(stale_baseline)} baseline entr(y/ies) no longer fire")
-        for check, path, token in stale_baseline[:20]:
+        for check, path, token in stale_baseline[:_MAX_REPORTED_STALE]:
             print(f"  - {check}\t{path}\t{token}")
-        if len(stale_baseline) > 20:
-            print(f"  ... and {len(stale_baseline) - 20} more")
+        if len(stale_baseline) > _MAX_REPORTED_STALE:
+            print(f"  ... and {len(stale_baseline) - _MAX_REPORTED_STALE} more")
         print("  -> prune them: python3 scripts/docs_lint.py --update-baseline")
     if findings.total() == 0:
         print("\nAll documentation checks passed")
@@ -2004,9 +2125,7 @@ def _self_test() -> int:
             (root / "docs" / "README.md").write_text("# Docs\n\n- [Ok](ok.md)\n", encoding="utf-8")
             (root / "docs" / "ok.md").write_text("# Ok\n\nBody.\n", encoding="utf-8")
             expected_token = build(root)
-            got = run(root).facts_for(check) + [
-                f for f in run(root).advisories if f.check == check
-            ]
+            got = run(root).facts_for(check) + [f for f in run(root).advisories if f.check == check]
             tokens = {f.token for f in got}
             if expected_token in tokens:
                 print(f"  ok  {label} detected")
@@ -2024,9 +2143,7 @@ def _self_test() -> int:
             (root / "docs" / "ok.md").write_text("# Ok\n\nBody.\n", encoding="utf-8")
             build(root)
             findings = run(root)
-            hits = findings.facts_for(check) + [
-                f for f in findings.advisories if f.check == check
-            ]
+            hits = findings.facts_for(check) + [f for f in findings.advisories if f.check == check]
             if hits:
                 print(f"  FAIL {label} was flagged ({sorted(f.token for f in hits)})")
                 failures += 1
@@ -2250,9 +2367,7 @@ def _self_test() -> int:
     # Fact checks: each one fires on a planted defect, and each documented
     # exemption is pinned so widening the rule fails here instead of in review.
     fact_probe("missing repo-anchored path", CHECK_PATH_EXISTS, plant_missing_repo_path)
-    fact_immunity_probe(
-        "repo path that exists", CHECK_PATH_EXISTS, allow_repo_path_that_exists
-    )
+    fact_immunity_probe("repo path that exists", CHECK_PATH_EXISTS, allow_repo_path_that_exists)
     fact_immunity_probe(
         "repo path resolvable one root down",
         CHECK_PATH_EXISTS,
@@ -2328,7 +2443,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--update-baseline",
         action="store_true",
-        help="prune triples that no longer fire; never adds one (seeds an absent file)",
+        help="prune triples that no longer fire; it can never add one",
+    )
+    parser.add_argument(
+        "--accept-new",
+        action="store_true",
+        help="ADD the triples firing now to the baseline, printing each one (needs a reason)",
     )
     parser.add_argument(
         "--strict-identifiers",
@@ -2345,21 +2465,42 @@ def main(argv: list[str] | None = None) -> int:
         print(f"docs-lint: no docs/ directory under {root}", file=sys.stderr)
         return 2
     baseline_path = Path(args.baseline) if args.baseline else root / DEFAULT_BASELINE
+    if args.update_baseline and args.accept_new:
+        print(
+            "docs-lint: --update-baseline and --accept-new are opposites; run one at a time",
+            file=sys.stderr,
+        )
+        return 2
 
     findings = run(root, strict_identifiers=args.strict_identifiers)
+    current = {f.key for f in findings.facts} | {f.key for f in findings.advisories}
 
     if args.update_baseline:
-        current = {f.key for f in findings.facts} | {f.key for f in findings.advisories}
+        # Prune-only, unconditionally: the intersection can only shrink the file,
+        # and `_read_baseline` refuses an absent one, so there is no path here that
+        # records a triple. Adding is `--accept-new`, which announces itself.
         recorded = _read_baseline(baseline_path)
-        if not baseline_path.is_file():
-            # Seeding: there is nothing to prune, and refusing here would leave no
-            # way to create the file at all.
-            _write_baseline(baseline_path, current)
-            print(f"seeded {baseline_path} with {len(current)} triple(s)")
-            return 0
         survivors = recorded & current
         _write_baseline(baseline_path, survivors)
         print(f"pruned {len(recorded) - len(survivors)} triple(s); {len(survivors)} remain")
+        return 0
+
+    if args.accept_new:
+        # The one operation that grows the file, kept separate and LOUD. A triple
+        # accepted here is a decision someone has to defend in review, so it is
+        # printed rather than silently folded in, and the count is reported.
+        recorded = _read_baseline(baseline_path)
+        added = sorted(current - recorded)
+        if not added:
+            print(f"nothing new to accept; {len(recorded)} triple(s) remain")
+            return 0
+        for check, path, token in added:
+            print(f"accepting {check}\t{path}\t{token}")
+        _write_baseline(baseline_path, recorded | current)
+        print(
+            f"accepted {len(added)} NEW triple(s) into {baseline_path}; "
+            "each one is an exemption a reviewer must agree with"
+        )
         return 0
 
     stale = apply_baseline(findings, _read_baseline(baseline_path))
