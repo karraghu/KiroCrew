@@ -201,7 +201,17 @@ export default function AwsConsentGate({
       </dl>
 
       {!c.identityResolved && c.identityDetail && !c.granted ? (
-        <div className="text-muted mb-2">{c.identityDetail}</div>
+        // `identityDetail` is only set when the identity probe FAILED (the
+        // backend's last_error for the credential check), so it is an error
+        // surface. The hand-off decision is the host's, via the same delegated
+        // `askAgent` prop the read/write notices use (see the prop doc above).
+        <ErrorNotice
+          variant="inline"
+          className="mb-2"
+          askAgent={askAgent}
+          testId="aws-consent-identity-error"
+          message={c.identityDetail}
+        />
       ) : null}
 
       {c.granted ? (

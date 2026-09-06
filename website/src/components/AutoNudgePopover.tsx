@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Goal, X } from 'lucide-react'
 import { Popover, PopoverTrigger, PopoverContent } from './ui/popover'
+import ErrorNotice from './ErrorNotice'
 import { api } from '../api/client'
 import { runBelongsToSlot } from '../apps/workflows/runModel'
 import { loadGoalDraft, saveGoalDraft, type GoalDraft } from '../utils/goalDrafts'
@@ -71,7 +72,7 @@ export default function AutoNudgePopover({ slotKey, loop, open, onOpenChange, on
   // lingering until it is reopened -- and the request dedupes with the other
   // consumer of the same key. `enabled: open` keeps a zero-token watch from
   // costing a request on every chat render just to say "still nothing".
-  const { data: cronJobs } = useQuery({
+  const { data: cronJobs, isError: watchesFailed, refetch: refetchWatches } = useQuery({
     queryKey: ['cron-jobs'],
     queryFn: () => api.crons().then(r => r.jobs || []),
     enabled: open,
@@ -305,6 +306,25 @@ export default function AutoNudgePopover({ slotKey, loop, open, onOpenChange, on
         </div>
         <p className="text-muted text-[11px] mb-3 leading-relaxed">{i18nT('components.autoNudgePopover.give_the_agent_a_goal_and_it_will_keep_working_t')}</p>
 
+        {watchesFailed && (
+          <div className="flex items-center justify-between gap-2 mb-3">
+            {/* No hand-off: the popover holds the unsaved goal message, idle and max-cycle inputs.
+                Retry is the recovery path, as on every sibling load-failure notice. */}
+            <ErrorNotice
+              variant="inline"
+              testId="auto-nudge-watches-error"
+              message={i18nT('components.autoNudgePopover.watches_load_failed')}
+            />
+            <button
+              type="button"
+              onClick={() => { void refetchWatches() }}
+              className="px-2 py-0.5 rounded border border-border text-[11px] text-muted hover:text-text bg-transparent cursor-pointer shrink-0"
+            >
+              {i18nT('components.autoNudgePopover.retry')}
+            </button>
+          </div>
+        )}
+
         {watches.length > 0 && (
           <div className="border border-border rounded p-2 mb-3">
             <div className="text-text text-[11px] font-medium mb-1">
@@ -372,7 +392,14 @@ export default function AutoNudgePopover({ slotKey, loop, open, onOpenChange, on
           </div>
         )}
 
-        {error && <div className="text-danger text-[11px] mb-2">{error}</div>}
+        {/* No hand-off: the popover holds the unsaved goal message, idle and max-cycle inputs. */}
+        <ErrorNotice
+          variant="inline"
+          className="mb-2"
+          testId="auto-nudge-error"
+          message={error}
+          onDismiss={() => setError('')}
+        />
 
         <div className="flex gap-2 justify-end">
           {loop && (

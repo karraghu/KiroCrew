@@ -5203,6 +5203,7 @@
       "pause_named": "Mettre {{name}} en pause",
       "paused": "en pause",
       "resume_named": "Reprendre {{name}}",
+      "retry": "Réessayer",
       "run_named_now": "Exécuter {{name}} maintenant",
       "running": "en cours",
       "schedule": "planification",
@@ -5539,11 +5540,13 @@
       "next_cycle_due": "Prochain cycle dû, se déclenche après le tour en cours",
       "next_cycle_in": "Prochain cycle dans {{time}}",
       "next_cycle_unscheduled": "Prochain cycle pas encore planifié",
+      "retry": "Réessayer",
       "save": "Enregistrer",
       "seconds_between_nudges": "Secondes entre relances",
       "set_a_goal": "Définir un objectif",
       "start_loop": "Démarrer la boucle",
       "stop_loop": "Arrêter la boucle",
+      "watches_load_failed": "Impossible de charger les veilles de cette session.",
       "watches_next": "prochaine",
       "watches_note": "Elles ne réveillent l'agent qu'en cas de signal réel. Gérez-les depuis la page Planification.",
       "watches_title": "Surveillances sans jetons"
@@ -5560,7 +5563,9 @@
       "terminal_is_in_its_own_window": "Le terminal est dans sa propre fenêtre",
       "move_panel_to_right": "Déplacer le panneau à droite",
       "move_panel_to_bottom": "Déplacer le panneau en bas",
-      "more_actions": "Plus d'actions"
+      "more_actions": "Plus d'actions",
+      "close_failed": "Impossible d'arrêter le shell de ce terminal sur le serveur. Il sera nettoyé automatiquement.",
+      "closing_terminal": "Fermeture du terminal…"
     },
     "chatInput": {
       "approval_hint_adjust": "Régler le mode d'approbation",
@@ -5670,7 +5675,9 @@
       "reset_to_global": "Rétablir la valeur globale ({{pct}} %)",
       "following_global": "Suit la valeur globale ({{pct}} %)",
       "sketch": "Croquis",
-      "sketch_desc": "Dessinez un croquis ; joint une image et sa source modifiable"
+      "sketch_desc": "Dessinez un croquis ; joint une image et sa source modifiable",
+      "optimize_failed": "Impossible d'optimiser le prompt. Ton texte d'origine a été restauré.",
+      "optimize_failed_elsewhere": "Impossible d'optimiser le prompt lancé dans une autre session. Son texte d'origine y a été restauré."
     },
     "chatPane": {
       "agent_list": "Liste des agents",
@@ -5679,7 +5686,9 @@
       "earlier_messages_open_session": "Messages précédents — ouvrir la session complète (ferme la vue divisée)",
       "earlier_messages_unavailable": "Les messages précédents ne sont plus disponibles dans l’historique de cette session.",
       "forked_from": "Dérivé de {{name}}",
+      "history_load_failed": "Impossible de charger les messages de cette session.",
       "model_list": "Liste des modèles",
+      "retry": "Réessayer",
       "session_ready_type_a_message_to_start": "Session prête. Saisissez un message pour commencer.",
       "split_down": "Diviser vers le bas",
       "split_right": "Diviser vers la droite",
@@ -5828,7 +5837,9 @@
       "cancel": "Annuler",
       "collapse_comments": "Réduire les commentaires",
       "comment": "Commentaire",
+      "comment_change_failed": "Impossible d'enregistrer cette modification du commentaire.",
       "comments": "Commentaires",
+      "comments_load_failed": "Impossible de charger les commentaires.",
       "delete": "Supprimer",
       "edit": "Modifier",
       "edit_comment": "Modifier le commentaire…",
@@ -5938,6 +5949,7 @@
     },
     "embedTabStrip": {
       "close_tab": "Fermer l'onglet",
+      "new_chat_failed": "Impossible de créer une nouvelle discussion.",
       "new_tab": "Nouvel onglet",
       "new_tab_shift_click_for_new_chat": "Nouvel onglet (Shift+clic pour une nouvelle conversation)",
       "sessions": "Sessions"
@@ -5960,6 +5972,7 @@
       "error": "Erreur",
       "failed_to_load": "Échec du chargement",
       "job_name": "Nom de la tâche",
+      "jobs_load_failed": "Impossible de vérifier quelles tâches existent encore ; les tâches supprimées ne sont donc pas signalées dans cet historique.",
       "next": "Suivant",
       "no_execution_history_yet": "Aucun historique d'exécution pour l'instant",
       "ok": "OK",

@@ -10,6 +10,8 @@ import { useChatScrollFollow } from '../app-sdk/useChatScrollFollow'
 import { EdgeFade, JumpToBottomButton } from '../app-sdk/ChatScrollChrome'
 import { createTranscriptRenderers } from '../pages/chat/transcriptRenderers'
 import ChatInput from './ChatInput'
+import ErrorNotice from './ErrorNotice'
+import { Btn } from './ui'
 import ChatDropOverlay, { useChatFileDrop } from './ChatDropOverlay'
 import PendingQuestionCard from './PendingQuestionCard'
 import QueueStack, { SubagentDeliveryProgress, splitPaneMessages } from './QueueStack'
@@ -104,6 +106,9 @@ export default function ChatPane({
   const [input, setInput] = useState('')
   const [pendingFiles, setPendingFiles] = useState<string[]>([])
   const [uploadError, setUploadError] = useState('')
+  // In-pane report of a per-slot setting write (agent / model switch) that did
+  // not persist — the shared toast is transient feedback, not the error surface.
+  const [switchError, setSwitchError] = useState('')
   const [agentBtnRect, setAgentBtnRect] = useState<DOMRect | null>(null)
   const [modelBtnRect, setModelBtnRect] = useState<DOMRect | null>(null)
   // Shared stick-to-bottom follow (same FollowController core as the main
@@ -272,7 +277,7 @@ export default function ChatPane({
     limitLatched.current = true
   }
   const hydrateLimit = limitRef.current
-  const { data: slotDetail } = useQuery({
+  const { data: slotDetail, isError: slotDetailFailed, refetch: refetchSlotDetail } = useQuery({
     queryKey: ['slot-messages', slotKey, hydrateLimit],
     queryFn: () => api.chatSlotDetail(slotKey, hydrateLimit),
     staleTime: Infinity,
@@ -289,16 +294,20 @@ export default function ChatPane({
 
   const switchAgent = useCallback(async (name: string) => {
     dispatch(setAgentSwitchNotice(null))
+    setSwitchError('')
     try {
       // Same protocol as switchModel below (#4523): the pane must not depend
       // on the coalesced slots rebroadcast to see its own pick.
       // performAgentSlotSwitch mirrors exactly what the response names.
       await performAgentSlotSwitch(slotKey, name, dispatch)
     } catch (e) {
-      dispatch(setAgentSwitchNotice(agentSwitchFailureMessage(e)))
+      const msg = agentSwitchFailureMessage(e)
+      dispatch(setAgentSwitchNotice(msg))
+      setSwitchError(msg)
     }
   }, [dispatch, slotKey])
   const switchModel = useCallback(async (name: string) => {
+    setSwitchError('')
     try {
       // performSlotSwitch owns the whole protocol: serialized dispatch,
       // latest-request-wins adjudication, hung-request timeout, and exactly
@@ -311,8 +320,12 @@ export default function ChatPane({
         },
         (value) => dispatch(updateSlot({ key: slotKey, model: value })))
     } catch (e) {
-      // Same failure surface as switchAgent above: the shared notice toast.
-      dispatch(setAgentSwitchNotice(agentSwitchFailureMessage(e)))
+      // Same failure surface as switchAgent above: the shared notice toast,
+      // plus the in-pane notice (the toast alone would be the only report of
+      // a write that did not persist).
+      const msg = agentSwitchFailureMessage(e)
+      dispatch(setAgentSwitchNotice(msg))
+      setSwitchError(msg)
       // Keep the rejected backend value available in developer diagnostics.
       // eslint-disable-next-line no-console
       console.error('[ChatPane] switchModel failed', e)
@@ -684,7 +697,19 @@ export default function ChatPane({
             sideways; wide children scroll within themselves. */}
         <div ref={follow.scrollerRef} onScroll={follow.onScroll} className="chat-container flex-1 overflow-y-auto overflow-x-hidden py-3 min-h-0">
           <div ref={follow.contentRef}>
-          {messages.length === 0 && !running && (
+          {slotDetailFailed && (
+            <div className="mx-4 my-2 flex items-start gap-2">
+              {/* No hand-off: the composer draft (`input`) in this pane is unsaved local
+                  state. The retry is the recovery path for the hydration read. */}
+              <ErrorNotice
+                className="flex-1"
+                testId="chat-pane-hydrate-error"
+                message={i18nT('components.chatPane.history_load_failed')}
+              />
+              <Btn onClick={() => { void refetchSlotDetail() }}>{i18nT('components.chatPane.retry')}</Btn>
+            </div>
+          )}
+          {messages.length === 0 && !running && !slotDetailFailed && (
             <div className="text-center text-muted text-[13px] py-8">{i18nT('components.chatPane.session_ready_type_a_message_to_start')}</div>
           )}
           {/* Suppressed on the active slot: that pane renders the store's full
@@ -761,12 +786,23 @@ export default function ChatPane({
           }}
         />
 
-        {uploadError && (
-          <div className="mx-4 mt-2 mb-0 bg-bg-elevated border rounded-lg p-3 flex items-center gap-3 animate-rise" style={{ borderColor: 'color-mix(in srgb, var(--danger) 45%, transparent)' }}>
-            <span className="text-sm text-text flex-1 min-w-0 break-words">{uploadError}</span>
-            <button onClick={() => setUploadError('')} aria-label={i18nT('pages.chatPage.dismiss_upload_error')} className="text-muted hover:text-text leading-none p-0.5 shrink-0"><X className="w-4 h-4" /></button>
-          </div>
-        )}
+        {/* No hand-off: the composer draft (`input`) below is unsaved local state. */}
+        <ErrorNotice
+          className="mx-4 mt-2 mb-0 animate-rise"
+          testId="chat-pane-upload-error"
+          message={uploadError}
+          onDismiss={() => setUploadError('')}
+        />
+        {/* No hand-off: same composer draft. The shared notice toast (App.tsx)
+            is transient; a per-slot setting write that did not persist must
+            also be reported in the pane whose control failed. */}
+        <ErrorNotice
+          variant="inline"
+          className="mx-4 mt-2"
+          testId="chat-pane-switch-error"
+          message={switchError}
+          onDismiss={() => setSwitchError('')}
+        />
 
         <ChatInput
           value={input}

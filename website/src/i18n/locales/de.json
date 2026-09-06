@@ -5118,6 +5118,7 @@
       "pause_named": "{{name}} pausieren",
       "paused": "pausiert",
       "resume_named": "{{name}} fortsetzen",
+      "retry": "Wiederholen",
       "run_named_now": "{{name}} jetzt ausführen",
       "running": "läuft",
       "schedule": "Zeitplan",
@@ -5450,11 +5451,13 @@
       "next_cycle_due": "Nächster Zyklus fällig, startet nach dem aktuellen Zug",
       "next_cycle_in": "Nächster Zyklus in {{time}}",
       "next_cycle_unscheduled": "Nächster Zyklus noch nicht geplant",
+      "retry": "Wiederholen",
       "save": "Speichern",
       "seconds_between_nudges": "Sekunden zwischen Anstößen",
       "set_a_goal": "Ein Ziel festlegen",
       "start_loop": "Schleife starten",
       "stop_loop": "Schleife stoppen",
+      "watches_load_failed": "Die Watches dieser Sitzung konnten nicht geladen werden.",
       "watches_next": "nächste",
       "watches_note": "Sie wecken den Agenten nur bei einem echten Signal. Verwaltung auf der Seite „Zeitplan“.",
       "watches_title": "Überwachungen ohne Tokenverbrauch"
@@ -5471,7 +5474,9 @@
       "terminal_is_in_its_own_window": "Das Terminal ist in einem eigenen Fenster",
       "move_panel_to_right": "Panel nach rechts verschieben",
       "move_panel_to_bottom": "Panel nach unten verschieben",
-      "more_actions": "Weitere Aktionen"
+      "more_actions": "Weitere Aktionen",
+      "close_failed": "Die Shell dieses Terminals konnte auf dem Server nicht beendet werden und wird automatisch aufgeräumt.",
+      "closing_terminal": "Terminal wird geschlossen…"
     },
     "chatInput": {
       "approval_hint_adjust": "Genehmigungsmodus anpassen",
@@ -5581,7 +5586,9 @@
       "reset_to_global": "Auf global zurücksetzen ({{pct}} %)",
       "following_global": "Folgt global ({{pct}} %)",
       "sketch": "Skizze",
-      "sketch_desc": "Skizze zeichnen; hängt ein Bild plus bearbeitbare Quelle an"
+      "sketch_desc": "Skizze zeichnen; hängt ein Bild plus bearbeitbare Quelle an",
+      "optimize_failed": "Der Prompt konnte nicht optimiert werden. Der ursprüngliche Text wurde wiederhergestellt.",
+      "optimize_failed_elsewhere": "Der in einer anderen Sitzung gestartete Prompt konnte nicht optimiert werden. Der ursprüngliche Text wurde dort wiederhergestellt."
     },
     "chatPane": {
       "agent_list": "Agenten-Liste",
@@ -5590,7 +5597,9 @@
       "earlier_messages_open_session": "Frühere Nachrichten — vollständige Sitzung öffnen (schließt die geteilte Ansicht)",
       "earlier_messages_unavailable": "Frühere Nachrichten sind im Verlauf dieser Sitzung nicht mehr verfügbar.",
       "forked_from": "Verzweigt von {{name}}",
+      "history_load_failed": "Die Nachrichten dieser Sitzung konnten nicht geladen werden.",
       "model_list": "Modellliste",
+      "retry": "Wiederholen",
       "session_ready_type_a_message_to_start": "Sitzung bereit. Geben Sie eine Nachricht ein, um zu beginnen.",
       "split_down": "Nach unten teilen",
       "split_right": "Nach rechts teilen",
@@ -5737,7 +5746,9 @@
       "cancel": "Abbrechen",
       "collapse_comments": "Kommentare einklappen",
       "comment": "Kommentar",
+      "comment_change_failed": "Diese Kommentaränderung konnte nicht gespeichert werden.",
       "comments": "Kommentare",
+      "comments_load_failed": "Kommentare konnten nicht geladen werden.",
       "delete": "Löschen",
       "edit": "Bearbeiten",
       "edit_comment": "Kommentar bearbeiten…",
@@ -5846,6 +5857,7 @@
     },
     "embedTabStrip": {
       "close_tab": "Tab schließen",
+      "new_chat_failed": "Es konnte kein neuer Chat erstellt werden.",
       "new_tab": "Neuer Tab",
       "new_tab_shift_click_for_new_chat": "Neuer Tab (Shift+Klick für neuen Chat)",
       "sessions": "Sitzungen"
@@ -5868,6 +5880,7 @@
       "error": "Fehler",
       "failed_to_load": "Laden fehlgeschlagen",
       "job_name": "Job-Name",
+      "jobs_load_failed": "Es konnte nicht geprüft werden, welche Jobs noch existieren, daher sind gelöschte Jobs in diesem Verlauf nicht markiert.",
       "next": "Weiter",
       "no_execution_history_yet": "Noch kein Ausführungsverlauf",
       "ok": "OK",

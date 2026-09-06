@@ -5033,6 +5033,7 @@
       "pause_named": "{{name}} を一時停止",
       "paused": "一時停止中",
       "resume_named": "{{name}} を再開",
+      "retry": "再試行",
       "run_named_now": "{{name}} を今すぐ実行",
       "running": "実行しています",
       "schedule": "スケジュール",
@@ -5361,11 +5362,13 @@
       "next_cycle_due": "次のサイクルは実行待ち、現在のターン終了後に実行",
       "next_cycle_in": "次のサイクルまで {{time}}",
       "next_cycle_unscheduled": "次のサイクルは未定",
+      "retry": "再試行",
       "save": "保存",
       "seconds_between_nudges": "ナッジ間の秒数",
       "set_a_goal": "目標を設定",
       "start_loop": "ループ開始",
       "stop_loop": "ループ停止",
+      "watches_load_failed": "このセッションのウォッチを読み込めませんでした。",
       "watches_next": "次回",
       "watches_note": "実際のシグナルがあったときだけエージェントを起こします。管理は「スケジュール」ページから。",
       "watches_title": "トークンを消費しない監視"
@@ -5382,7 +5385,9 @@
       "terminal": "ターミナル",
       "move_panel_to_right": "パネルを右に移動",
       "move_panel_to_bottom": "パネルを下に移動",
-      "more_actions": "その他の操作"
+      "more_actions": "その他の操作",
+      "close_failed": "サーバー上でこのターミナルのシェルを停止できませんでした。自動的にクリーンアップされます。",
+      "closing_terminal": "ターミナルを閉じています…"
     },
     "chatInput": {
       "approval_hint_adjust": "承認モードを調整",
@@ -5492,7 +5497,9 @@
       "reset_to_global": "グローバル設定に戻す（{{pct}}%）",
       "following_global": "グローバル設定に従う（{{pct}}%）",
       "sketch": "スケッチ",
-      "sketch_desc": "スケッチを描く。画像と編集可能なソースを添付します"
+      "sketch_desc": "スケッチを描く。画像と編集可能なソースを添付します",
+      "optimize_failed": "プロンプトを最適化できませんでした。元のテキストを復元しました。",
+      "optimize_failed_elsewhere": "別のセッションで開始したプロンプトを最適化できませんでした。元のテキストはそのセッションに復元されています。"
     },
     "chatPane": {
       "agent_list": "エージェントリスト",
@@ -5501,7 +5508,9 @@
       "earlier_messages_open_session": "以前のメッセージ — セッション全体を開く（分割表示を閉じます）",
       "earlier_messages_unavailable": "以前のメッセージはこのセッションの履歴では利用できなくなりました。",
       "forked_from": "{{name}} からフォーク",
+      "history_load_failed": "このセッションのメッセージを読み込めませんでした。",
       "model_list": "モデルリスト",
+      "retry": "再試行",
       "session_ready_type_a_message_to_start": "セッション準備完了。メッセージを入力して開始してください。",
       "split_down": "下に分割",
       "split_right": "右に分割",
@@ -5646,7 +5655,9 @@
       "cancel": "キャンセル",
       "collapse_comments": "コメントを折りたたむ",
       "comment": "コメント",
+      "comment_change_failed": "そのコメントの変更を保存できませんでした。",
       "comments": "コメント",
+      "comments_load_failed": "コメントを読み込めませんでした。",
       "delete": "削除",
       "edit": "編集",
       "edit_comment": "コメントを編集…",
@@ -5754,6 +5765,7 @@
     },
     "embedTabStrip": {
       "close_tab": "タブを閉じる",
+      "new_chat_failed": "新しいチャットを作成できませんでした。",
       "new_tab": "新規タブ",
       "new_tab_shift_click_for_new_chat": "新規タブ（新しいチャット用 Shift+クリック）",
       "sessions": "セッション"
@@ -5776,6 +5788,7 @@
       "error": "エラー",
       "failed_to_load": "読み込みに失敗しました",
       "job_name": "ジョブ名",
+      "jobs_load_failed": "どのジョブがまだ存在するか確認できなかったため、この履歴では削除済みジョブが表示されていません。",
       "next": "次へ",
       "no_execution_history_yet": "実行履歴はまだありません",
       "ok": "OK",

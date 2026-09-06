@@ -5203,6 +5203,7 @@
       "pause_named": "Pausar {{name}}",
       "paused": "en pausa",
       "resume_named": "Reanudar {{name}}",
+      "retry": "Reintentar",
       "run_named_now": "Ejecutar {{name}} ahora",
       "running": "en ejecución",
       "schedule": "programación",
@@ -5539,11 +5540,13 @@
       "next_cycle_due": "Próximo ciclo pendiente, se ejecuta tras el turno actual",
       "next_cycle_in": "Próximo ciclo en {{time}}",
       "next_cycle_unscheduled": "Próximo ciclo aún no programado",
+      "retry": "Reintentar",
       "save": "Guardar",
       "seconds_between_nudges": "Segundos entre empujones",
       "set_a_goal": "Establecer un objetivo",
       "start_loop": "Iniciar el bucle",
       "stop_loop": "Detener el bucle",
+      "watches_load_failed": "No se pudieron cargar las vigilancias de esta sesión.",
       "watches_next": "siguiente",
       "watches_note": "Solo despiertan al agente ante una señal real. Gestiónalas en la página Programación.",
       "watches_title": "Vigilancias sin consumo de tokens"
@@ -5560,7 +5563,9 @@
       "terminal_is_in_its_own_window": "La terminal está en su propia ventana",
       "move_panel_to_right": "Mover panel a la derecha",
       "move_panel_to_bottom": "Mover panel abajo",
-      "more_actions": "Más acciones"
+      "more_actions": "Más acciones",
+      "close_failed": "No se pudo detener el shell de este terminal en el servidor. Se limpiará automáticamente.",
+      "closing_terminal": "Cerrando terminal…"
     },
     "chatInput": {
       "approval_hint_adjust": "Ajustar el modo de aprobación",
@@ -5670,7 +5675,9 @@
       "reset_to_global": "Restablecer al global ({{pct}}%)",
       "following_global": "Sigue el global ({{pct}}%)",
       "sketch": "Boceto",
-      "sketch_desc": "Dibuja un boceto; adjunta una imagen y su fuente editable"
+      "sketch_desc": "Dibuja un boceto; adjunta una imagen y su fuente editable",
+      "optimize_failed": "No se pudo optimizar el prompt. Se restauró tu texto original.",
+      "optimize_failed_elsewhere": "No se pudo optimizar el prompt que iniciaste en otra sesión. Su texto original se restauró allí."
     },
     "chatPane": {
       "agent_list": "Lista de agentes",
@@ -5679,7 +5686,9 @@
       "earlier_messages_open_session": "Mensajes anteriores — abrir la sesión completa (cierra la vista dividida)",
       "earlier_messages_unavailable": "Los mensajes anteriores ya no están disponibles en el historial de esta sesión.",
       "forked_from": "Bifurcado de {{name}}",
+      "history_load_failed": "No se pudieron cargar los mensajes de esta sesión.",
       "model_list": "Lista de modelos",
+      "retry": "Reintentar",
       "session_ready_type_a_message_to_start": "Sesión lista. Escribe un mensaje para empezar.",
       "split_down": "Dividir abajo",
       "split_right": "Dividir a la derecha",
@@ -5828,7 +5837,9 @@
       "cancel": "Cancelar",
       "collapse_comments": "Contraer los comentarios",
       "comment": "Comentario",
+      "comment_change_failed": "No se pudo guardar ese cambio en el comentario.",
       "comments": "Comentarios",
+      "comments_load_failed": "No se pudieron cargar los comentarios.",
       "delete": "Eliminar",
       "edit": "Editar",
       "edit_comment": "Editar comentario…",
@@ -5938,6 +5949,7 @@
     },
     "embedTabStrip": {
       "close_tab": "Cerrar la pestaña",
+      "new_chat_failed": "No se pudo crear un chat nuevo.",
       "new_tab": "Nueva pestaña",
       "new_tab_shift_click_for_new_chat": "Nueva pestaña (Shift+clic para un chat nuevo)",
       "sessions": "Sesiones"
@@ -5960,6 +5972,7 @@
       "error": "Error",
       "failed_to_load": "No se pudo cargar",
       "job_name": "Nombre del trabajo",
+      "jobs_load_failed": "No se pudo comprobar qué trabajos siguen existiendo, así que los trabajos eliminados no están marcados en este historial.",
       "next": "Siguiente",
       "no_execution_history_yet": "Aún no hay historial de ejecuciones",
       "ok": "OK",

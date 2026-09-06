@@ -5033,6 +5033,7 @@
       "pause_named": "{{name}} 일시중지",
       "paused": "일시중지됨",
       "resume_named": "{{name}} 재개",
+      "retry": "다시 시도",
       "run_named_now": "{{name}} 지금 실행",
       "running": "실행 중",
       "schedule": "일정",
@@ -5361,11 +5362,13 @@
       "next_cycle_due": "다음 주기 대기 중, 현재 턴 종료 후 실행",
       "next_cycle_in": "다음 주기까지 {{time}}",
       "next_cycle_unscheduled": "다음 주기 미정",
+      "retry": "다시 시도",
       "save": "저장",
       "seconds_between_nudges": "넛지 간격(초)",
       "set_a_goal": "목표 설정",
       "start_loop": "루프 시작",
       "stop_loop": "루프 중지",
+      "watches_load_failed": "이 세션의 워치를 불러올 수 없습니다.",
       "watches_next": "다음",
       "watches_note": "실제 신호가 있을 때만 에이전트를 깨웁니다. 스케줄 페이지에서 관리하세요.",
       "watches_title": "토큰을 쓰지 않는 감시"
@@ -5382,7 +5385,9 @@
       "terminal_is_in_its_own_window": "터미널이 별도 창에 있습니다",
       "move_panel_to_right": "패널을 오른쪽으로 이동",
       "move_panel_to_bottom": "패널을 아래로 이동",
-      "more_actions": "추가 작업"
+      "more_actions": "추가 작업",
+      "close_failed": "서버에서 이 터미널의 셸을 중지할 수 없습니다. 자동으로 정리됩니다.",
+      "closing_terminal": "터미널을 닫는 중…"
     },
     "chatInput": {
       "approval_hint_adjust": "승인 모드 조정",
@@ -5492,7 +5497,9 @@
       "reset_to_global": "전역 설정으로 재설정 ({{pct}}%)",
       "following_global": "전역 설정 따름 ({{pct}}%)",
       "sketch": "스케치",
-      "sketch_desc": "스케치를 그리기. 이미지와 편집 가능한 원본을 첨부합니다"
+      "sketch_desc": "스케치를 그리기. 이미지와 편집 가능한 원본을 첨부합니다",
+      "optimize_failed": "프롬프트를 최적화할 수 없습니다. 원래 텍스트를 복원했습니다.",
+      "optimize_failed_elsewhere": "다른 세션에서 시작한 프롬프트를 최적화할 수 없습니다. 원래 텍스트는 해당 세션에 복원되었습니다."
     },
     "chatPane": {
       "agent_list": "에이전트 목록",
@@ -5501,7 +5508,9 @@
       "earlier_messages_open_session": "이전 메시지 — 전체 세션 열기(분할 보기 닫힘)",
       "earlier_messages_unavailable": "이전 메시지를 이 세션 기록에서 더 이상 사용할 수 없습니다.",
       "forked_from": "{{name}}에서 포크됨",
+      "history_load_failed": "이 세션의 메시지를 불러올 수 없습니다.",
       "model_list": "모델 목록",
+      "retry": "다시 시도",
       "session_ready_type_a_message_to_start": "세션이 준비되었습니다. 메시지를 입력하여 시작하세요.",
       "split_down": "아래로 분할",
       "split_right": "오른쪽으로 분할",
@@ -5646,7 +5655,9 @@
       "cancel": "취소",
       "collapse_comments": "댓글 접기",
       "comment": "댓글",
+      "comment_change_failed": "해당 댓글 변경을 저장할 수 없습니다.",
       "comments": "댓글",
+      "comments_load_failed": "댓글을 불러올 수 없습니다.",
       "delete": "삭제",
       "edit": "편집",
       "edit_comment": "댓글 편집…",
@@ -5754,6 +5765,7 @@
     },
     "embedTabStrip": {
       "close_tab": "탭 닫기",
+      "new_chat_failed": "새 채팅을 만들 수 없습니다.",
       "new_tab": "새 탭",
       "new_tab_shift_click_for_new_chat": "새 탭 (새 채팅은 Shift+클릭)",
       "sessions": "세션"
@@ -5776,6 +5788,7 @@
       "error": "오류",
       "failed_to_load": "불러오지 못했습니다",
       "job_name": "작업 이름",
+      "jobs_load_failed": "어떤 작업이 아직 존재하는지 확인할 수 없어 이 기록에서 삭제된 작업이 표시되지 않습니다.",
       "next": "다음",
       "no_execution_history_yet": "아직 실행 기록이 없습니다",
       "ok": "성공",

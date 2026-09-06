@@ -34,6 +34,7 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { isTouchDevice } from '../utils/isTouchDevice'
 import { useIsTouchDevice } from '../hooks/useIsTouchDevice'
 import { Btn, Slider } from './ui'
+import ErrorNotice from './ErrorNotice'
 import { useTouchPushToTalk } from '../hooks/useTouchPushToTalk'
 import { consumeComposerRelease } from '../pages/chat/composerFocus'
 import BusySendButton, { useBusySendMode } from './BusySendButton'
@@ -960,6 +961,10 @@ function ChatInput({
   // Non-null while the last approval decision failed. Rendered as a one-line
   // strip under the composer; auto-clears so it cannot become permanent chrome.
   const [approvalNotice, setApprovalNotice] = useState<string | null>(null)
+  // The same notice slot carries two different things: STATUS about an
+  // approval that expired (nothing failed on our side) and a FAILED decision
+  // submit (a rejected request). Only the latter is an error surface.
+  const [approvalNoticeKind, setApprovalNoticeKind] = useState<'status' | 'error'>('status')
 
   const activeSlot = slotId
   const approvalMeta = pendingApproval?.meta as Record<string, unknown> | undefined
@@ -1086,6 +1091,7 @@ function ChatInput({
         // window (minutes), so by the time a human reads the card the job has
         // usually already been denied and moved on — "expired" alone reads as
         // a dashboard bug rather than the job's documented timeout.
+        setApprovalNoticeKind('status')
         setApprovalNotice(
           approvalIsUnattended
             ? i18nT('components.chatInput.that_request_already_timed_out_and_was_denied', { source: approvalSource })
@@ -1095,6 +1101,7 @@ function ChatInput({
       }
       // eslint-disable-next-line no-console -- surface real approval-resolution failures to the dev console
       console.error('Approval failed:', err)
+      setApprovalNoticeKind('error')
       setApprovalNotice(i18nT('components.chatInput.could_not_submit_that_decision_see_the_console_f'))
     }
     if (['trust_command', 'trust_base', 'trust', 'trust_reads'].includes(decision) && activeSlot) {
@@ -1480,6 +1487,8 @@ function ChatInput({
     staleTime: 30_000,
   })
   const autoCompact = autoCompactQuery.data ?? null
+  // In-popover report of an auto-compact threshold write that did not persist.
+  const [autoCompactError, setAutoCompactError] = useState('')
   // INVARIANT: every threshold POST is chained onto the previous
   // write for that slot, so writes commit in issue order — a delayed earlier
   // POST can never land after (and overwrite) a newer value on the server.
@@ -1501,6 +1510,7 @@ function ChatInput({
   const autoCompactMutation = useMutation({
     mutationFn: ({ slot, pct }: { slot: string; pct: number | null }) => enqueueAutoCompactWrite(slot, pct),
     onSuccess: (r, vars) => {
+      setAutoCompactError('')
       queryClient.setQueryData(
         ['slot-autocompact', vars.slot],
         (prev: { pct: number | null; global_pct: number; min: number; max: number } | undefined) =>
@@ -1514,8 +1524,11 @@ function ChatInput({
       // Surface the failure the way the sibling per-slot settings do (model,
       // reasoning effort): a silent snap-back leaves the user's compaction
       // intent unapplied with no explanation — and with the popover closed,
-      // no visible change at all.
-      dispatch(setAgentSwitchNotice(agentSwitchFailureMessage(err)))
+      // no visible change at all. The toast is transient feedback only; the
+      // in-popover ErrorNotice (autoCompactError) is the error surface.
+      const msg = agentSwitchFailureMessage(err)
+      dispatch(setAgentSwitchNotice(msg))
+      setAutoCompactError(msg)
     },
   })
   const pushAutoCompact = useCallback((pct: number | null) => {
@@ -1672,6 +1685,9 @@ function ChatInput({
   // dismisses the overlay here and only reveals it again when we return to the
   // originating session. Null when no optimize is in flight.
   const optimizeSlotRef = useRef<string | null>(null)
+  // In-composer report of a rejected optimize request (the restored prompt
+  // alone says nothing about why the optimizer did not run).
+  const [optimizeError, setOptimizeError] = useState('')
   const slashMenuOpenRef = useRef(false)
   slashMenuOpenRef.current = slashMenuOpen
   const filePickerOpenRef = useRef(false)
@@ -1969,6 +1985,7 @@ function ChatInput({
   }, [onChange])
 
   const optimizeMutation = useMutation({
+    onMutate: () => { setOptimizeError('') },
     mutationFn: async (
       { prompt, context, pastes }: {
         prompt: string
@@ -2006,6 +2023,16 @@ function ChatInput({
     onError: (err, variables) => {
       // eslint-disable-next-line no-console -- surface prompt-optimizer failures to the dev console
       console.warn('optimizer failed', err)
+      // The user must learn the optimizer failed: restoring the prompt alone is
+      // indistinguishable from "the optimizer changed nothing". Shown on
+      // whichever session is on screen — this composer instance is the
+      // always-mounted surface; a notice gated on the originating slot would
+      // stay hidden for a user who navigated away mid-optimize. The copy names
+      // where the restore happened, so it never claims a change to a composer
+      // the user is looking at that did not visibly change.
+      setOptimizeError(variables.slotId === slotId
+        ? i18nT('components.chatInput.optimize_failed')
+        : i18nT('components.chatInput.optimize_failed_elsewhere'))
       // Same slot-routing split as onSuccess. On the originating session,
       // restore the original prompt in place; otherwise hand it back to that
       // session's draft so a failed optimize on a backgrounded session doesn't
@@ -3245,7 +3272,28 @@ function ChatInput({
         )}
       </AnimatePresence>
 
-      {approvalNotice && (
+      {optimizeError && (
+        <div className="px-4 mb-1">
+          {/* No hand-off: the composer draft below (the prompt that was restored) is unsaved. */}
+          <ErrorNotice
+            variant="inline"
+            testId="optimize-error"
+            message={optimizeError}
+            onDismiss={() => setOptimizeError('')}
+          />
+        </div>
+      )}
+      {approvalNotice && approvalNoticeKind === 'error' && (
+        <div className="px-4 mb-1">
+          {/* No hand-off: the composer draft below is unsaved. */}
+          <ErrorNotice
+            testId="approval-decision-error"
+            message={approvalNotice}
+            onDismiss={() => setApprovalNotice(null)}
+          />
+        </div>
+      )}
+      {approvalNotice && approvalNoticeKind === 'status' && (
         <div
           role="status"
           className="flex items-center gap-2 px-4 py-2 mb-1 bg-[color-mix(in_srgb,var(--warn)_12%,transparent)] rounded-lg"
@@ -4035,8 +4083,26 @@ function ChatInput({
                             </div>
                           )}
                           {autoCompactQuery.isError && !autoCompact && (
-                            <div className="mt-2 pt-2 border-t border-border text-[10px] text-muted">
-                              {i18nT('components.chatInput.auto_compact_load_failed')}
+                            <div className="mt-2 pt-2 border-t border-border">
+                              {/* No hand-off: the composer draft below is unsaved. */}
+                              <ErrorNotice
+                                variant="inline"
+                                testId="auto-compact-load-error"
+                                message={i18nT('components.chatInput.auto_compact_load_failed')}
+                              />
+                            </div>
+                          )}
+                          {autoCompactError && (
+                            <div className="mt-2 pt-2 border-t border-border">
+                              {/* No hand-off: same composer draft. The shared notice toast is
+                                  transient; the write that did not persist is reported HERE,
+                                  next to the slider whose value snapped back. */}
+                              <ErrorNotice
+                                variant="inline"
+                                testId="auto-compact-write-error"
+                                message={autoCompactError}
+                                onDismiss={() => setAutoCompactError('')}
+                              />
                             </div>
                           )}
                           {autoCompact && (

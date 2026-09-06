@@ -5033,6 +5033,7 @@
       "pause_named": "暂停 {{name}}",
       "paused": "已暂停",
       "resume_named": "恢复 {{name}}",
+      "retry": "重试",
       "run_named_now": "立即运行 {{name}}",
       "running": "执行中",
       "schedule": "定时",
@@ -5361,11 +5362,13 @@
       "next_cycle_due": "下次循环已到期，将在当前轮次结束后触发",
       "next_cycle_in": "距下次循环还有 {{time}}",
       "next_cycle_unscheduled": "下次循环尚未安排",
+      "retry": "重试",
       "save": "保存",
       "seconds_between_nudges": "推动间隔秒数",
       "set_a_goal": "设定目标",
       "start_loop": "启动循环",
       "stop_loop": "停止循环",
+      "watches_load_failed": "无法加载此会话的监视项。",
       "watches_next": "下次",
       "watches_note": "只在出现真实信号时唤醒智能体。可在“计划”页面管理。",
       "watches_title": "零 token 监视"
@@ -5382,7 +5385,9 @@
       "terminal_is_in_its_own_window": "终端已在独立窗口中打开",
       "move_panel_to_right": "将面板移至右侧",
       "move_panel_to_bottom": "将面板移至底部",
-      "more_actions": "更多操作"
+      "more_actions": "更多操作",
+      "close_failed": "无法在服务器上停止此终端的 shell。它会被自动清理。",
+      "closing_terminal": "正在关闭终端…"
     },
     "chatInput": {
       "approval_hint_adjust": "调整审批模式",
@@ -5492,7 +5497,9 @@
       "reset_to_global": "重置为全局设置（{{pct}}%）",
       "following_global": "跟随全局设置（{{pct}}%）",
       "sketch": "草图",
-      "sketch_desc": "画个草图；会附上图片和可编辑源文件"
+      "sketch_desc": "画个草图；会附上图片和可编辑源文件",
+      "optimize_failed": "无法优化提示词。已恢复原始文本。",
+      "optimize_failed_elsewhere": "无法优化在另一个会话中发起的提示词。原始文本已在该会话中恢复。"
     },
     "chatPane": {
       "agent_list": "代理列表",
@@ -5501,7 +5508,9 @@
       "earlier_messages_open_session": "更早的消息 — 打开完整会话（关闭分屏）",
       "earlier_messages_unavailable": "更早的消息在此会话的历史记录中不再可用。",
       "forked_from": "分叉自 {{name}}",
+      "history_load_failed": "无法加载此会话的消息。",
       "model_list": "模型列表",
+      "retry": "重试",
       "session_ready_type_a_message_to_start": "会话就绪。输入消息即可开始。",
       "split_down": "向下分屏",
       "split_right": "向右分屏",
@@ -5646,7 +5655,9 @@
       "cancel": "取消",
       "collapse_comments": "折叠评论",
       "comment": "评论",
+      "comment_change_failed": "无法保存该评论更改。",
       "comments": "评论",
+      "comments_load_failed": "无法加载评论。",
       "delete": "删除",
       "edit": "编辑",
       "edit_comment": "编辑评论…",
@@ -5754,6 +5765,7 @@
     },
     "embedTabStrip": {
       "close_tab": "关闭标签页",
+      "new_chat_failed": "无法创建新的对话。",
       "new_tab": "新标签页",
       "new_tab_shift_click_for_new_chat": "新标签页（Shift+点击新建聊天）",
       "sessions": "会话"
@@ -5776,6 +5788,7 @@
       "error": "错误",
       "failed_to_load": "加载失败",
       "job_name": "任务名称",
+      "jobs_load_failed": "无法确认哪些任务仍然存在，因此此历史记录中未标记已删除的任务。",
       "next": "下一页",
       "no_execution_history_yet": "暂无执行历史",
       "ok": "成功",

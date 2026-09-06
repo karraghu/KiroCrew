@@ -7,6 +7,7 @@ import DetailPanel from './DetailPanel'
 import Clickable from './Clickable'
 import SelectionToolbar, { type SelectionAction } from './SelectionToolbar'
 import { SendBtn } from './ui'
+import ErrorNotice from './ErrorNotice'
 import { ArtifactBodyNative, ArtifactBodyIframe, ArtifactBodyImage } from './ArtifactBody'
 import { useFileArtifactComments } from './FileArtifactComments'
 import { formatArtifactCommentsMessage } from './CommentOverlay'
@@ -262,8 +263,13 @@ export default memo(function ArtifactPanel({ slug, kind, content, onClose, activ
           <span className="text-[13px]">{i18nT('components.artifactPanel.loading_artifact')}</span>
         </div>
       ) : loadFailed ? (
-        <div className="h-full flex items-center justify-center px-6 text-center text-[13px] text-danger">
-          {i18nT('components.artifactPanel.couldn_t_load_this_artifact_it_may_have_been_del')}
+        <div className="h-full flex items-center justify-center px-6">
+          {/* Read failure before anything loaded — nothing in the panel to lose, so the hand-off is on. */}
+          <ErrorNotice
+            askAgent
+            testId="artifact-panel-load-error"
+            message={i18nT('components.artifactPanel.couldn_t_load_this_artifact_it_may_have_been_del')}
+          />
         </div>
       ) : effectiveKind === 'image' && artifact ? (
         <ArtifactBodyImage

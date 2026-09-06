@@ -1342,6 +1342,7 @@
       "pause_named": "Pause {{name}}",
       "paused": "paused",
       "resume_named": "Resume {{name}}",
+      "retry": "Retry",
       "run_named_now": "Run {{name}} now",
       "running": "running"
     },
@@ -1498,10 +1499,14 @@
       "next_cycle_due": "Next cycle due, fires after the current turn",
       "next_cycle_in": "Next cycle in {{time}}",
       "next_cycle_unscheduled": "Next cycle not yet scheduled",
+      "retry": "Retry",
       "save": "Save",
-      "start_loop": "Start loop"
+      "start_loop": "Start loop",
+      "watches_load_failed": "Couldn't load this session's watches."
     },
     "bottomTerminalPanel": {
+      "close_failed": "Couldn't stop this terminal's shell on the server. It will be cleaned up automatically.",
+      "closing_terminal": "Closing terminal…",
       "maximum_terminals": "Maximum {{n}} terminals",
       "terminal": "Terminal"
     },
@@ -1559,13 +1564,17 @@
       "auto_compact_threshold": "Auto-compact threshold",
       "auto_compact_load_failed": "Couldn't load the auto-compact setting",
       "reset_to_global": "Reset to global ({{pct}}%)",
-      "following_global": "Following global ({{pct}}%)"
+      "following_global": "Following global ({{pct}}%)",
+      "optimize_failed": "Couldn't optimize the prompt. Your original text was restored.",
+      "optimize_failed_elsewhere": "Couldn't optimize the prompt you started in another session. Its original text was restored there."
     },
     "chatPane": {
       "earlier_messages_load_failed": "Couldn't load earlier messages. Scroll to the top of the session to try again.",
       "earlier_messages_open_session": "Earlier messages — open full session (closes split)",
       "earlier_messages_unavailable": "Earlier messages are no longer available in this session's history.",
-      "forked_from": "Forked from {{name}}"
+      "forked_from": "Forked from {{name}}",
+      "history_load_failed": "Couldn't load this session's messages.",
+      "retry": "Retry"
     },
     "cliPanel": {
       "copied": "Copied",
@@ -1651,7 +1660,9 @@
       "unknown": "Unknown",
       "anchor_text_no_longer_found_in_content": "Anchor text no longer found in content",
       "failed_to_sync_to_provider": "Failed to sync to provider",
-      "pending_sync_to_provider": "Pending sync to provider"
+      "pending_sync_to_provider": "Pending sync to provider",
+      "comment_change_failed": "Couldn't save that comment change.",
+      "comments_load_failed": "Couldn't load comments."
     },
     "computerUseLiveView": {
       "close": "Close",
@@ -1706,13 +1717,15 @@
       "searching_2": "Searching: {{name}}"
     },
     "embedTabStrip": {
+      "new_chat_failed": "Couldn't create a new chat.",
       "sessions": "Sessions"
     },
     "excalidrawBlock": {
       "render_failed": "Couldn't render diagram — showing source"
     },
     "executionsView": {
-      "failed_to_load": "Failed to load"
+      "failed_to_load": "Failed to load",
+      "jobs_load_failed": "Couldn't check which jobs still exist, so deleted jobs aren't flagged in this history."
     },
     "feedbackPill": {
       "nightly": "Nightly",

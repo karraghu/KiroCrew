@@ -440,6 +440,9 @@ export default function SidePanel({
   // Closing a terminal tab kills its PTY (server) and disposes local state. The
   // server delete goes through a React Query mutation (use-react-query
   // guideline); the synchronous WS + xterm teardown stays in disposeTerminalSession.
+  // A rejected delete lands in the shared close-failed flag (set by the hook),
+  // rendered by the always-mounted BottomTerminalPanel root — this tab is
+  // already gone by then.
   const deleteTerminalSession = useDeleteTerminalSession()
   const handleCloseTab = useCallback((id: string) => {
     const t = tabs.find(x => x.id === id)
