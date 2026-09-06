@@ -5647,6 +5647,66 @@ def configured_sandbox_mode() -> str:
         return _SANDBOX_MODE_FALLBACK
 
 
+def agent_shell_os_confined() -> bool:
+    """Does an OS sandbox layer confine the agent's shell child right now?
+
+    Mirrors the decision :func:`wrap_argv` makes for the interactive agent spawn,
+    read from the same inputs, so the answer describes the process the agent's
+    shell tool actually runs in:
+
+    * ``agent.sandbox`` is a real tier and this host has a backend: Kiro Crew's
+      own namespace or Seatbelt profile confines the child (or, on macOS with
+      kiro-cli's internal sandbox on, that sandbox does, by the mutual-exclusion
+      delegation). Either way an OS layer is present.
+    * ``agent.sandbox`` is ``"off"``: the only possible layer is kiro-cli's
+      internal sandbox, and it is the layer exactly where ``wrap_argv`` delegates
+      to it -- a harness in :data:`ACP_BACKENDS_INTERNAL_SANDBOX` on a platform
+      where the delegation exists, with the capability read answering true.
+      Linux never delegates, so ``"off"`` there is genuinely unconfined.
+
+    The sensitive-path bash gate consults this to decide whether its
+    shell-structure passes (directory-entry tracking and traversal analysis) still
+    buy anything: those passes reconstruct which files a command will OPEN from
+    its text, which is the question an OS path deny answers exactly, at the
+    kernel, for every spelling. Under a confining layer the gate keeps only its
+    literal keystone matchers and the behaviour rules the sandbox cannot see.
+
+    Fails toward ``False``: any error reading config, probing the backend, or
+    reading the capability file reports the child as unconfined, which keeps
+    the full text analysis on. That is the direction a failure must resolve in
+    -- an unreadable setting can only ever ADD checks, never drop them.
+    """
+    try:
+        mode = configured_sandbox_mode()
+        if mode != "off":
+            return detect_backend(mode) != "none"
+        if sys.platform not in _INTERNAL_SANDBOX_DELEGATION_PLATFORMS:
+            return False
+        from kiro_crew.acp_backends import ACP_BACKENDS_INTERNAL_SANDBOX
+        from kiro_crew.config.loader import (
+            KiroCrewConfig,  # circular import: sandbox is a low-level dep of config.loader
+        )
+
+        backend = str(getattr(KiroCrewConfig.load().agent, "acp_backend", ""))
+        if backend not in ACP_BACKENDS_INTERNAL_SANDBOX:
+            return False
+        return kiro_internal_sandbox_enabled()
+    except Exception:
+        logger.warning(
+            "Could not determine whether the agent shell is OS-confined; "
+            "keeping the full text analysis on",
+            exc_info=True,
+        )
+        return False
+
+
+# The platforms on which ``wrap_argv`` hands isolation to kiro-cli's internal
+# sandbox when ``agent.sandbox`` is ``"off"``: macOS by the Seatbelt
+# mutual-exclusion rule, Windows by the explicit Kiro-only delegation. Linux is
+# absent on purpose -- namespace isolation never delegates there.
+_INTERNAL_SANDBOX_DELEGATION_PLATFORMS = frozenset({"darwin", "win32"})
+
+
 # The single environment marker that proves this process is already INSIDE a
 # KiroCrew namespace sandbox. Deny-by-default: the gate keys ONLY on the
 # explicit, single-purpose ``KIROCREW_SANDBOX_ACTIVE``, which is exported at

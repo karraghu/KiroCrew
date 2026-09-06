@@ -926,9 +926,24 @@ def _extract_tool_input_strings(tool_input: str) -> list[str]:
 _MAX_SCANNABLE_TOOL_INPUT_CHARS = MAX_SCANNABLE_COMMAND_CHARS
 
 
+def _agent_shell_os_confined() -> bool:
+    """Is the agent's shell child under an OS sandbox layer right now?
+
+    Deferred import: ``sandbox`` is a low-level module that reaches back into
+    the hook layer at call time, and this module sits above both. The value is
+    the bash gate's ``os_confined`` input; a failure in the read answers
+    ``False``, which keeps every text pass on.
+    """
+    from kiro_crew.sandbox import agent_shell_os_confined
+
+    return agent_shell_os_confined()
+
+
 def _title_denial(
     title: str,
     denied_regexes: list[str] | None,
+    *,
+    os_confined: bool = False,
 ) -> tuple[str, str] | None:
     """Return the always-enforced denial for the tool *title*, or ``None``.
 
@@ -940,10 +955,14 @@ def _title_denial(
     a hop that offloaded only the tool_input strings left the crash path in
     place. The tuple is ``(kind, reason)`` with *kind* ``"path"`` / ``"bash"`` /
     ``"regex"``; the reasons are the exact strings the on-loop checks produced.
+
+    ``os_confined`` is threaded to the bash gate, which drops its shell-structure
+    passes when an OS sandbox already confines the child; see
+    ``security.is_sensitive_bash_command``.
     """
     if is_sensitive_path(title):
         return ("path", f"Blocked: sensitive path: {title}")
-    bash_reason = is_sensitive_bash_command(title)
+    bash_reason = is_sensitive_bash_command(title, os_confined=os_confined)
     if bash_reason:
         return ("bash", bash_reason)
     deny_reason = is_denied(title, denied_regexes=denied_regexes)
@@ -955,6 +974,8 @@ def _title_denial(
 def _first_tool_input_denial(
     strings: list[str],
     denied_regexes: list[str] | None,
+    *,
+    os_confined: bool = False,
 ) -> tuple[str, str, str] | None:
     """Return the first tool_input denial among *strings*, or ``None``.
 
@@ -992,7 +1013,7 @@ def _first_tool_input_denial(
             )
         if is_sensitive_path(s):
             return ("path", f"Blocked: sensitive path in tool_input: {s}", s)
-        _input_bash = is_sensitive_bash_command(s)
+        _input_bash = is_sensitive_bash_command(s, os_confined=os_confined)
         if _input_bash:
             return ("bash", _input_bash, s)
         _input_deny = is_denied(s, denied_regexes=denied_regexes)
@@ -2149,11 +2170,17 @@ async def _resolve_permission(
         # ``is_sensitive_path`` (which does release the GIL) and yields between
         # the strings. Title first, so a request denied on its title
         # reports the title-tier reason and mechanism exactly as before.
-        title_hit = _title_denial(normalized, _denied_regexes)
+        #
+        # One sandbox-posture read for both tiers, taken on this worker hop
+        # because the first read may probe the backend (a fork on Linux).
+        os_confined = _agent_shell_os_confined()
+        title_hit = _title_denial(normalized, _denied_regexes, os_confined=os_confined)
         if title_hit is not None:
             return (title_hit[0], title_hit[1], normalized, "always_deny")
         if _input_strings:
-            input_hit = _first_tool_input_denial(_input_strings, _denied_regexes)
+            input_hit = _first_tool_input_denial(
+                _input_strings, _denied_regexes, os_confined=os_confined
+            )
             if input_hit is not None:
                 return (*input_hit, "always_deny_input")
         return None

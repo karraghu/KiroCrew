@@ -129,6 +129,19 @@ class HookResult:
         return HookResult(action=HOOK_INJECT_CONTEXT, text=text)
 
 
+def _agent_shell_os_confined() -> bool:
+    """Is the agent's shell child under an OS sandbox layer right now?
+
+    Deferred import: ``sandbox`` imports this module at call time for
+    ``safe_read_file``, so a top-level import here would be a cycle. The value is
+    the bash gate's ``os_confined`` input; a failure anywhere in the read answers
+    ``False``, which keeps every text pass on.
+    """
+    from kiro_crew.sandbox import agent_shell_os_confined
+
+    return agent_shell_os_confined()
+
+
 @dataclass
 class ToolHookResult:
     action: str  # TOOL_ALLOW, TOOL_AUTO_APPROVE, TOOL_DENY
@@ -712,11 +725,18 @@ class HookManager:
         # the encoded form — honouring a pin late is not honouring it.
         ctx = current_context()
         enabled_ids = security.enabled_rule_ids(self._effective_denied(ctx))
+        # Read ONCE per call, like the context snapshot above, so the title and
+        # the raw command are judged under the same sandbox posture. The bash
+        # gate drops only its shell-structure passes on a confined child; the
+        # literal keystone matchers and the behaviour rules run regardless.
+        os_confined = _agent_shell_os_confined()
         for target in security_targets:
             if is_sensitive_path(target):
                 return ToolHookResult.deny(f"Blocked: access to sensitive path: {target}")
             # execute_bash (prefixed or bare) — check for reads of sensitive paths.
-            reason = is_sensitive_bash_command(target, enabled_ids=enabled_ids)
+            reason = is_sensitive_bash_command(
+                target, enabled_ids=enabled_ids, os_confined=os_confined
+            )
             if reason:
                 return ToolHookResult.deny(reason)
             # Data-exfiltration / reverse-shell command shapes.

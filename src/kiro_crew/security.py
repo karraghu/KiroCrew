@@ -11490,10 +11490,58 @@ def _sensitive_run_in_source_literals(
         return (False, None)
 
 
+def _structure_pass_results(
+    command: str, traversal_subjects: "Sequence[str] | None"
+) -> "Iterator[str | None]":
+    """Run the shell-STRUCTURE passes of the bash gate, yielding each verdict in order.
+
+    These are the passes that reconstruct which files a command will open from
+    the shape of the command line rather than from a path it names: the
+    native-shell entry-then-relative-read scan, the alternate-traversal analysis
+    and the ``find`` traversal analysis. They are grouped behind one function
+    because they share a premise -- text analysis standing in for a path deny the
+    OS is not applying -- and so they are switched off together when an OS
+    sandbox IS applying it (see ``is_sensitive_bash_command``'s ``os_confined``).
+
+    Lazy on purpose: the caller stops at the first denial, so a later pass never
+    runs once an earlier one has refused, exactly as the passes ran inline.
+
+    The two traversal passes walk shell structure under a fail-closed budget, so
+    unlike the token passes they need a subject that IS a command line.
+    ``traversal_subjects`` is ``None`` for one, and the subject is then the
+    command itself. A caller whose subject only CONTAINS command strings (a
+    source body) supplies those strings instead; see ``is_sensitive_bash_command``.
+    Each subject is analysed completely and independently, and the first denial
+    wins, so adding subjects can only add denials.
+    """
+    # ── Pass 3: native-shell entry-then-relative-read scan ──
+    yield _check_native_home_entry_then_fenced_read(command)
+
+    command_subjects = (command,) if traversal_subjects is None else tuple(traversal_subjects)
+    for subject in command_subjects:
+        # ── Pass 4: alternate traversal tools rooted above a fenced path ──
+        yield _check_alt_traversal_reaches_fence(subject)
+
+        # ── Pass 5: a `find` traversal that DELIVERS a fenced match ──
+        # The passes above all judge a TOKEN. `find` factors the path across two
+        # arguments and produces it at runtime, so no token names it -- see the block
+        # comment on `_check_find_traversal_reaches_fence`. It judges every text this
+        # command runs as a shell, not just the outer line, so a traversal wrapped in a
+        # `-c` payload or a substitution is judged too.
+        #
+        # Pass 4 is the sibling of this one and the two are disjoint by construction: it
+        # answers the same question for every traversal program EXCEPT `find` (its own
+        # docstring says so), because `find` is the one whose filter grammar decides
+        # which paths the traversal even produces. Neither subsumes the other, so both
+        # run; being disjoint on the program word, their order does not matter.
+        yield _check_find_traversal_reaches_fence(subject)
+
+
 def is_sensitive_bash_command(
     command: str,
     *,
     enabled_ids: "frozenset[str] | None" = None,
+    os_confined: bool = False,
     _subject_is_shell_grammar: bool = True,
     _traversal_subjects: "Sequence[str] | None" = None,
     _env_subject: str | None = None,
@@ -11562,6 +11610,21 @@ def is_sensitive_bash_command(
     :data:`MAX_SCANNABLE_SOURCE_BODY_CHARS`. It is never absent, only larger:
     ``is_sensitive_source_body`` raises it, no caller removes it.
 
+    ``os_confined`` says an OS sandbox confines the process this command will run
+    in (``sandbox.agent_shell_os_confined()`` is the caller-side source). When true
+    the shell-STRUCTURE passes (3 to 5, grouped in ``_structure_pass_results``) are
+    skipped: they reconstruct which files a command will OPEN from its text, which
+    is the question a kernel path deny answers exactly and for every spelling, so
+    under a sandbox they add wall-clock and false refusals while catching nothing
+    the kernel does not. Everything else stays: passes 0 to 2 judge paths the
+    command NAMES (the keystone leaves and credential homes by their literal or
+    normalized spelling, which is what protects the governance ceiling under a
+    sandbox tier that exposes third-party credential homes by design), and the
+    IMDS and env-credential rules describe behaviour no path deny sees. The
+    default is the full analysis, so a caller that does not know its sandbox
+    posture -- cron command vetting, computer-use input vetting, the source-body
+    scanner -- keeps every pass.
+
     Returns denial reason string, or None if clean.
     """
     # ── Pass 0: size ceiling ──
@@ -11620,45 +11683,22 @@ def is_sensitive_bash_command(
     if normalizer_result:
         return normalizer_result
 
-    # ── Pass 3: native-shell entry-then-relative-read scan ──
-    native_result = _check_native_home_entry_then_fenced_read(command)
-    if native_result:
-        return native_result
-
-    # ── Passes 4 and 5: the two TRAVERSAL analyses ──
-    # Both walk shell STRUCTURE under a fail-closed budget, so unlike every pass above
-    # they need a subject that IS a command line. `_traversal_subjects` is None for one,
-    # and the tuple below is then just the command itself -- identical work, identical
-    # verdicts. A caller whose subject only CONTAINS command strings (a source body)
-    # supplies those strings instead; see the parameter's note in the docstring.
-    #
-    # Each subject is analysed completely and independently, and the FIRST denial wins,
-    # so adding subjects can only add denials.
-    command_subjects = (
-        (command,) if _traversal_subjects is None else tuple(_traversal_subjects)
-    )
-
-    for subject in command_subjects:
-        # ── Pass 4: alternate traversal tools rooted above a fenced path ──
-        alt_result = _check_alt_traversal_reaches_fence(subject)
-        if alt_result:
-            return alt_result
-
-        # ── Pass 5: a `find` traversal that DELIVERS a fenced match ──
-        # The passes above all judge a TOKEN. `find` factors the path across two
-        # arguments and produces it at runtime, so no token names it -- see the block
-        # comment on `_check_find_traversal_reaches_fence`. It judges every text this
-        # command runs as a shell, not just the outer line, so a traversal wrapped in a
-        # `-c` payload or a substitution is judged too.
-        #
-        # Pass 4 is the sibling of this one and the two are disjoint by construction: it
-        # answers the same question for every traversal program EXCEPT `find` (its own
-        # docstring says so), because `find` is the one whose filter grammar decides
-        # which paths the traversal even produces. Neither subsumes the other, so both
-        # run; being disjoint on the program word, their order does not matter.
-        find_result = _check_find_traversal_reaches_fence(subject)
-        if find_result:
-            return find_result
+    # ── Passes 3 to 5 reconstruct which files the command will OPEN from its
+    # shell STRUCTURE (a directory entry followed by a relative name, a traversal
+    # rooted above a fenced store). That is the exact question an OS path deny
+    # answers at the kernel for every spelling, so under a confining sandbox the
+    # three passes add wall-clock and false refusals (a `grep -r` root resolved
+    # against the gateway's own directory) while catching nothing the kernel
+    # does not. The literal matchers above and the behaviour rules below stay:
+    # they judge text the sandbox cannot see (the keystone leaves by name,
+    # IMDS addresses, env-credential pipelines).
+    if os_confined:
+        structure_results: "Iterable[str | None]" = ()
+    else:
+        structure_results = _structure_pass_results(command, _traversal_subjects)
+    for structure_result in structure_results:
+        if structure_result:
+            return structure_result
 
     # IMDS access via any IP encoding (decimal, hex, octal, IPv6-mapped)
     #
