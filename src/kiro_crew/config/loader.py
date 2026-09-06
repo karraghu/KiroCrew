@@ -2732,7 +2732,7 @@ class KiroCrewConfig:
                 subagent_max_turns=_safe_int(
                     agent_data.get("subagent_max_turns", 100), 100, 1, SUBAGENT_MAX_TURNS_CEILING
                 ),
-                subagent_timeout_secs=agent_data.get("subagent_timeout_secs", 1800),
+                subagent_timeout_secs=agent_data.get("subagent_timeout_secs", 10800),
                 subagent_stall_idle_secs=_safe_int(
                     agent_data.get("subagent_stall_idle_secs", 120), 120
                 ),
