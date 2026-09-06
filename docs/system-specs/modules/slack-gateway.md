@@ -21,13 +21,20 @@ Slack Socket Mode → events.py (dispatch) → handler.py → SessionManager →
 | `slack/files.py` | Non-audio file attachment processing — images (download → temp → ACP base64 inline), text (download → content inject), unsupported (metadata note). Size limits, mimetype allowlist, credential redaction, SEL audit |
 | `slack/format.py` | Markdown → Slack mrkdwn conversion (headings, links, strike, tables, mermaid, ANSI strip, truncation) |
 | `slack/handler.py` | `handle_message()` — streams ACP response, `handle_interaction()` — button clicks (with None provider guard) |
-| `slack/gateway.py` | `GatewayOrchestrator` — service lifecycle, cron/heartbeat/secretary/subagent/task callbacks, shutdown, auto-update. Entry point: `run_gateway()` |
+| `slack/gateway.py` | `GatewayOrchestrator` — service lifecycle, cron/heartbeat/subagent/task callbacks, shutdown, auto-update. Entry point: `run_gateway()` |
 | `slack/events.py` | Socket Mode event routing — dedup (`SeenCache`), slash commands, `member_joined_channel` tracking, message dispatch |
 | `slack/interactions.py` | Block Kit button routing — tool approval, OPTIONS choices, cron/subagent ack, allowlist approve/deny, track channel approve/deny |
 | `slack/blocks.py` | Reusable Block Kit dict builders for slash command UIs (session list, send-to-slack). Action IDs: `mc_<command>_<action>[_<id>]` |
 | `slack/allowlist.py` | Tracking-channel allowlist prompts (`prompt_allowlist`, `prompt_track_channel`) + config persistence (`persist_allowed_user`, `persist_tracking_channel`) |
 | `slack/scope_probe.py` | Tracked-channel history-readability probe (`warn_unreadable_tracked_channels`) — warns when the installed token cannot read a tracked channel (e.g. a private channel on an install predating `groups:history`) |
 | `slack/enterprise.py` | Enterprise Grid workspace validation — `validate_enterprise()` (startup auth.test + cache) + `check_message_origin()` (per-message team_id check). SEL audit on all outcomes. See V2160269460 |
+| `slack/channel_resolver.py` | Channel ID → human-readable name resolution (in-memory + on-disk cache), because `ChannelConfig` stores no name field |
+| `slack/outbound.py` | Lifecycle of a posted OPTIONS control. Holds no rendering of its own — `slack/format.py` owns that, so the redaction pipeline exists once |
+| `slack/retry.py` | One bounded DM-open retry (`open_dm`) shared by every DM sender, so retryability and backoff cannot drift. `post_message` stays single-shot per call site |
+| `slack/renderer.py` | `SlackRenderer` — maps the neutral `messaging.TurnDriver` `OutputEvent` stream onto Slack streaming + Block Kit |
+| `slack/transport.py` | `SlackTransport` — Slack as a concrete `MessagingTransport`; `authorize` is deny-by-default |
+| `slack/transport_dispatch.py` | The full new-path dispatch (transport → `TurnDriver` → renderer) that `events.py` routes to when `messaging.use_transport` is on |
+| `slack/sessions_view.py` | Slack half of the recent-sessions list shared by the slash command, the DM keyword and the App Home tab; collection lives in `messaging/sessions_view.py` |
 
 ## APIs
 
@@ -224,7 +231,6 @@ Available to all allowed users.
 | `run status` | `_handle_task_run` | Check task runner status |
 
 ### Channel Monitoring
-### Channel Monitoring
 - Config: `config.json → slack.tracking_channels` — list of channel IDs to watch
 - Event: `member_joined_channel` — fires when a user joins a channel the bot is in
 - Requires `channels:read` scope (for public channels) and `groups:read` (for private)
@@ -239,7 +245,7 @@ Available to all allowed users.
 
 Slack `file_share` messages are processed in `_route_message()` after dedup + auth. Three categories handled in order:
 
-### Voice / Audio (`transcribe.py`)
+### Voice / Audio (`kiro_crew/transcribe.py`)
 - **Mimetypes**: `audio/*`, `video/webm`
 - **Flow**: Download via `SlackClientOps.download_file()` → `transcribe.transcribe_audio()` → transcription text prepended as `[Voice memo transcription]...[End of transcription]`
 - **Config**: Enabled by default (`stt.enabled = true`). `stt.provider` decides where recognition runs, and the default `local` runs it in this process on a resident whisper.cpp model, so a memo costs one model download (`stt.model`, `base` by default) and nothing after that. A stored retired provider degrades to `local`; there is no binary to put on `PATH`. Availability per provider comes from `transcribe.availability_detail()`, which distinguishes a missing `voice` extra from a platform with no prebuilt recognizer and from a macOS too old for the `apple` provider, because those need different fixes. The pinned `imageio-ffmpeg` wheel decodes the memo's ogg/Opus or webm internally and is bundled in desktop releases; users do not install system FFmpeg. Setup: [configuration](../../../src/kiro_crew/docs/configuration.md) § Speech-to-text.
@@ -603,7 +609,7 @@ Config example (remote access via URL):
 - **Interactive payload access check**: `interactions.dispatch()` uses deny-by-default — rejects unless the clicking user is positively confirmed as allowed. Non-allowed users receive an ephemeral message ("⛔ You are not authorized to use these buttons.") and the original buttons remain intact for the owner to click later.
 - Dedup cache (`SeenCache`) prevents processing duplicate Slack events
 - Bot self-message filtering via `bot_id` check
-- **Trusted bot IDs** (`slack.trusted_bot_ids` in config): allows specific bot IDs to bypass the blanket `bot_id` filter, enabling multi-node mesh communication. Empty list = all bot messages dropped (default), and a bot id NOT in the list is denied exactly as with no list (fail-closed, `error=untrusted_bot`). Admission requires a positive `bot_id` match against the allowlist; the match sets `from_trusted_bot`, which lets the `bot_id` stand in as `sender_id` and grants access equivalent to an allowed user — authorization is explicit via the `trusted_bot_ids` config allowlist, not the `slack_allowed_users` list. All trusted-bot permission decisions emit SEL audit events (allowed decisions carry `resources="trusted_bot"` so the decision basis is traceable). Echo protection: error replies to trusted-bot messages are suppressed on both dispatch routes — the native path (`from_trusted_bot` in `handle_message`) and the default transport path (`from_trusted_bot` in `handle_message_transport`, threaded through the immediate call, both session queues, and `_dispatch_queued`; the error message is suppressed but the thread status is still cleared). Successful-reply loops are bounded by the **per-thread turn cap** (`slack.trusted_bot_turn_limit`, default 5, minimum 1): a thread that has run that many consecutive trusted-bot turns admits no more (`error=trusted_bot_turn_limit_reached`) until an allowed human posts in it, which resets the count — without the cap, two mutually trusted gateways would admit each other's replies as fresh turns indefinitely. Only a message that actually dispatches a turn moves the count (Slack retries, message/app_mention duplicate pairs, and activation-dropped messages do not). Review-mode channels deny trusted bots outright (`error=trusted_bot_denied_in_review_channel`): the review draft flow delivers via an ephemeral to the sender, which requires a human user id. The gateway's own bot id (cached from the startup `auth.test` that enterprise validation already performs) is never trusted even when listed (`error=own_bot_id_never_trusted`) — otherwise every reply would re-enter the handler as fresh input, a self-reply loop; when `auth.test` was unavailable the self identity is unverified and the admission FAILS CLOSED, trusting nobody (`error=trusted_bot_requires_verified_self_id`) — the same posture enterprise validation takes for a configured allowlist with unverifiable workspace identity. The (unwired) `SlackTransport.receive` inbound path applies the same admission — positive allow-list match via its `trusted_bot_ids` constructor param, own-bot exclusion, fail-closed unverified self id, audited decisions, trust before the subtype filter — so the two Slack inbound paths agree about which peer bots are admissible.
+- **Trusted bot IDs** (`slack.trusted_bot_ids` in config): allows specific bot IDs to bypass the blanket `bot_id` filter, enabling multi-node mesh communication. Empty list = all bot messages dropped (default), and a bot id NOT in the list is denied exactly as with no list (fail-closed, `error=untrusted_bot`). Admission requires a positive `bot_id` match against the allowlist; the match sets `from_trusted_bot`, which lets the `bot_id` stand in as `sender_id` and grants access equivalent to an allowed user — authorization is explicit via the `trusted_bot_ids` config allowlist, not the `slack.allowed_users` list. All trusted-bot permission decisions emit SEL audit events (allowed decisions carry `resources="trusted_bot"` so the decision basis is traceable). Echo protection: error replies to trusted-bot messages are suppressed on both dispatch routes — the native path (`from_trusted_bot` in `handle_message`) and the default transport path (`from_trusted_bot` in `handle_message_transport`, threaded through the immediate call, both session queues, and `_dispatch_queued`; the error message is suppressed but the thread status is still cleared). Successful-reply loops are bounded by the **per-thread turn cap** (`slack.trusted_bot_turn_limit`, default 5, minimum 1): a thread that has run that many consecutive trusted-bot turns admits no more (`error=trusted_bot_turn_limit_reached`) until an allowed human posts in it, which resets the count — without the cap, two mutually trusted gateways would admit each other's replies as fresh turns indefinitely. Only a message that actually dispatches a turn moves the count (Slack retries, message/app_mention duplicate pairs, and activation-dropped messages do not). Review-mode channels deny trusted bots outright (`error=trusted_bot_denied_in_review_channel`): the review draft flow delivers via an ephemeral to the sender, which requires a human user id. The gateway's own bot id (cached from the startup `auth.test` that enterprise validation already performs) is never trusted even when listed (`error=own_bot_id_never_trusted`) — otherwise every reply would re-enter the handler as fresh input, a self-reply loop; when `auth.test` was unavailable the self identity is unverified and the admission FAILS CLOSED, trusting nobody (`error=trusted_bot_requires_verified_self_id`) — the same posture enterprise validation takes for a configured allowlist with unverifiable workspace identity. The (unwired) `SlackTransport.receive` inbound path applies the same admission — positive allow-list match via its `trusted_bot_ids` constructor param, own-bot exclusion, fail-closed unverified self id, audited decisions, trust before the subtype filter — so the two Slack inbound paths agree about which peer bots are admissible.
 - Socket Mode — no public URL exposed
 - Credentials stored in `~/.kiro/crew/.env` with `chmod 600`
 
@@ -617,14 +623,3 @@ Config example (remote access via URL):
 | `croniter` | — | Cron expression matching |
 | `snowballstemmer` | — | Snowball stemming for semantic KV keyword scoring |
 | `pysqlite3-binary` | — | FTS5/UPSERT compat on AL2 (Linux only) |
-
-### Secretary Service (`secretary.py`)
-
-Background Slack inbox manager initialized via `_init_secretary()` if `secretary.enabled` is true:
-
-- **Polling**: discovers unread channels via `slack_unreads.mjs`, fetches messages + thread replies
-- **Classification**: batch LLM prompt classifies messages as `needs_reply` / `fyi` / `noise`
-- **Draft generation**: on-demand via `draft_reply()` with confidence tiers
-- **Alerts**: keyword matching + name mention detection → dashboard notification
-- **Self-healing**: reinitializes Slack client after 3 consecutive poll failures
-- **WS events**: `secretary_new_item`, `secretary_item_updated`, `secretary_item_sent`
