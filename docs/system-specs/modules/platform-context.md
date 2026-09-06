@@ -1060,8 +1060,10 @@ own interface rather than accreting onto the nearest existing one.
 **Agent discovery.** `agent_discovery.py` owns it, and `AgentInfo` is the record
 it yields. The `source` classification is generic — no product-specific hardcode:
 `"kirocrew"` for `kirocrew.json` / `kirocrew-lite.json`, `"package"` for a
-package-installed agent, `"builtin"` for the rest. Its importers are `subagent`,
-`mcp_core`, `conductor_skill`, and the dashboard agents handlers.
+package-installed agent, `"builtin"` for the rest. It has many consumers —
+`agent`, `session`, `context`, `subagent`, `mcp_core`, `cron_script`,
+`slack/handler` and several dashboard modules among them — so treat any list here as
+representative rather than exhaustive.
 - **There is no browser-auth provider hook.** Browsing runs through the external
   `playwright-cli` binary (`kiro_crew/browser_cli/`), and a logged-in session
   reaches that binary through the CLI's own surfaces (`state-save` /

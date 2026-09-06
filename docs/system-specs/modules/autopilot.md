@@ -40,7 +40,7 @@ is Autopilot") so the model recognizes user references to *autopilot* /
 | `slack/gateway.py` | `_subagent_done` orchestration guard: per-task failures, per-stage rounds, escalation text |
 | `session_workspace.py` | `~/.kiro/crew/sessions/<id>/` layout for sub-agent result files |
 | `conductor_skill.py` | Always-on delegation skill (`agent.conductor_skill`, default `false`); independent of Autopilot |
-| `website/src/pages/chat/AssistantMessage.tsx` | `parseOptions` turns `[OPTION: …]` into buttons and sets `isPlan` |
+| `website/src/app-sdk/protocol/options.ts` | `parseOptions` — turns `[OPTION: …]` into buttons and sets `isPlan`. `website/src/pages/chat/AssistantMessage.tsx` is its consumer |
 | `website/src/pages/ChatPage.tsx` | Routes a plan-option click to `api.planAction()` |
 
 ## Slot modes
@@ -147,7 +147,8 @@ appears to skip the gate entirely.
 
 ### Frontend rendering
 
-`parseOptions` (`website/src/pages/chat/AssistantMessage.tsx`) takes the
+`parseOptions` (`website/src/app-sdk/protocol/options.ts`, called from
+`AssistantMessage.tsx`) takes the
 **last** `[OPTION(S): …]` marker for the button list, strips **every** marker
 from the displayed text so a stray earlier marker cannot leak as raw syntax, and
 sets `isPlan` when both a plan header and a stage marker are present. Every

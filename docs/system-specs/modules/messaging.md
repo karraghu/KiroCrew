@@ -1681,7 +1681,7 @@ answer is not permission: a raised evaluation and a `Decision` without
   acting on another is how a guard becomes ornamental. The refusal names neither the
   path nor the reason, since distinguishing "sensitive" from "missing" is an oracle
   for probing which roots exist on the host. This matches what the dashboard's
-  `/api/taskrunner/start` already did; the channel keyword was the surface missing
+  `POST /api/taskrunner` (`api_taskrunner_start`) already did; the channel keyword was the surface missing
   it.
 - **A session-scoped gate is keyed by SESSION KEY, and its predicate never tests a
   namespace**: `privacy_mode.is_restricted` is a dict lookup, so a Slack, Telegram

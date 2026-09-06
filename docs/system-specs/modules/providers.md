@@ -1,7 +1,10 @@
 ## LLM Provider Abstraction
 
 Kiro Crew drives every LLM through one seam: the `LLMProvider` ABC in
-`providers/base.py`, implemented once by `AcpProvider` in `providers/acp.py`.
+`providers/base.py`. `AcpProvider` (`providers/acp.py`) is the only implementation
+the factory selects; `AcpSessionProvider` (`acp/session_provider.py`) is a second
+concrete subclass, the adapter a shared-runtime session is swapped onto once
+`AcpRuntime` is up.
 `agent.provider` is fixed to `"acp"` (enum `["acp"]`) — the provider is not the
 harness selector. **Which harness that one provider drives is a separate
 decision, taken from `acp_backends.py`**: `agent.acp_backend` names a backend id

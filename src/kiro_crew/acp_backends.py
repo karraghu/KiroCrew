@@ -1,8 +1,8 @@
 """Which ACP backends this build can serve — the one place that decides.
 
 The question this module owns is **capability**: can this build drive the harness
-at all? The public edition registers kiro-cli and KAS; an edition plugin adds its
-own from ``ProviderRegistry.register_acp_backends`` by calling
+at all? The public baseline registers kiro-cli, Claude Code, KAS and Codex; an
+edition plugin adds its own from ``ProviderRegistry.register_acp_backends`` by calling
 :func:`register_selectable_backend`, the structural twin of
 ``publish_provider.register_provider``.
 
@@ -130,9 +130,9 @@ POLICY_ID_BY_BACKEND: dict = {
     ACP_BACKEND_KIRO: POLICY_ID_KIRO,
     ACP_BACKEND_KAS: ACP_BACKEND_KAS,
     ACP_BACKEND_CLAUDE: ACP_BACKEND_CLAUDE,
-    # Present even though no build ships codex as selectable: a policy author has to
-    # be able to deny an id BEFORE an edition registers it, and the mapping is what
-    # makes the id nameable in a rule at all.
+    # Every known id needs an entry: a policy author has to be able to name — and so
+    # to deny — any id this build can spell, and the mapping is what makes the id
+    # nameable in a rule at all.
     ACP_BACKEND_CODEX: ACP_BACKEND_CODEX,
 }
 

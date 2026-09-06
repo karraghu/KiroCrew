@@ -13,7 +13,7 @@ agent loads only the one it needs.
 | Spec | Subsystem |
 |---|---|
 | [acp-client.md](acp-client.md) | The ACP JSON-RPC client that drives `kiro-cli`: transport, framing, timeouts, and the backend seam. |
-| [providers.md](providers.md) | The `LLMProvider` interface and the KiroACP-only provider surface. |
+| [providers.md](providers.md) | The `LLMProvider` interface, the `AcpProvider` the factory selects, and how a backend id is chosen. |
 | [harness-parity.md](harness-parity.md) | The invariants keeping the Kiro harness first-class while other harnesses are adapted, and the test pinning each. |
 | [harness-onboarding.md](harness-onboarding.md) | The sequence a new ACP harness walks to land: vocabulary, capability decisions, spawn path, handshake, install probe, selectability, and what a live harness additionally touches. |
 | [kas-backend.md](kas-backend.md) | The second, adapted ACP backend: how Crew selects and adapts it (the `kas_wire` seam, harness-parity, ABC defaults) and the deferred hooks / transport / `/clear` items. Crew-side only. |

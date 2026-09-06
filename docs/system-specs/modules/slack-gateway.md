@@ -30,10 +30,10 @@ Slack Socket Mode → events.py (dispatch) → handler.py → SessionManager →
 | `slack/enterprise.py` | Enterprise Grid workspace validation — `validate_enterprise()` (startup auth.test + cache) + `check_message_origin()` (per-message team_id check). SEL audit on all outcomes. See V2160269460 |
 | `slack/channel_resolver.py` | Channel ID → human-readable name resolution (in-memory + on-disk cache), because `ChannelConfig` stores no name field |
 | `slack/outbound.py` | Lifecycle of a posted OPTIONS control. Holds no rendering of its own — `slack/format.py` owns that, so the redaction pipeline exists once |
-| `slack/retry.py` | One bounded DM-open retry (`open_dm`) shared by every DM sender, so retryability and backoff cannot drift. `post_message` stays single-shot per call site |
+| `slack/retry.py` | `open_dm_with_retry` — one bounded DM-open retry with a single retryability classification and backoff. Reached through `GatewayOrchestrator._open_dm_with_retry`; other DM-open sites still call `SlackClientOps.open_dm` directly, so coverage is the orchestrator paths, not every sender. `post_message` stays single-shot per call site |
 | `slack/renderer.py` | `SlackRenderer` — maps the neutral `messaging.TurnDriver` `OutputEvent` stream onto Slack streaming + Block Kit |
-| `slack/transport.py` | `SlackTransport` — Slack as a concrete `MessagingTransport`; `authorize` is deny-by-default |
-| `slack/transport_dispatch.py` | The full new-path dispatch (transport → `TurnDriver` → renderer) that `events.py` routes to when `messaging.use_transport` is on |
+| `slack/transport.py` | `SlackTransport` — Slack as a concrete `MessagingTransport` with a deny-by-default `authorize`. No live path constructs it; only `channel_type` is read, by `handlers_system` |
+| `slack/transport_dispatch.py` | The new-path dispatch `events.py` routes to when `messaging.use_transport` is on: `handle_message_transport` builds a `TurnDriver` and `SlackRenderer` over the existing Slack client. It does not go through `SlackTransport.receive` or `authorize` |
 | `slack/sessions_view.py` | Slack half of the recent-sessions list shared by the slash command, the DM keyword and the App Home tab; collection lives in `messaging/sessions_view.py` |
 
 ## APIs
