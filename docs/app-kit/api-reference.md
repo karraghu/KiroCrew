@@ -20,9 +20,14 @@ How you talk to the Gateway depends on where your code runs:
   `fetch()` / a WebSocket. The full endpoint list is in
   [Gateway REST API Endpoints](#gateway-rest-api-endpoints).
 
-There is no published TypeScript gateway-client npm package. The `kirocrew-client`
-method names below describe the canonical Gateway API surface — the same
-endpoints any client (including raw `fetch`) talks to.
+There is no published TypeScript gateway-client npm package, and none is planned
+here — the camelCase names used throughout the sections below are **labels for
+Gateway endpoints**, not callable methods. Read them as endpoint identifiers.
+Two surfaces are real and callable: the `@kirocrew/app-sdk` hooks (documented in
+the next section, resolved from the host import map) and the shipped
+`kirocrew-client` Python package, whose actual method list is in
+[Python Client](#python-client). Anything named below that appears in neither is
+a Gateway endpoint you call directly with `fetch` or `aiohttp`.
 
 ## App SDK Hooks (dashboard UI)
 
@@ -262,11 +267,16 @@ that genuinely needs live app state is supplied by the host as an entry.
 
 ## Gateway API Surface
 
-The sections below document the canonical Gateway API surface as exposed by the
-`kirocrew-client` Python package (see the [Python Client](#python-client)
-section for the constructor and full method list). Method names are also a
-convenient way to refer to each endpoint — the same endpoints any client
-(including raw `fetch`) talks to.
+The sections below name the Gateway API surface. A name here is an **endpoint
+label**, not a guarantee that a client method exists for it: the shipped
+`kirocrew-client` Python package covers part of this surface, and
+[Python Client](#python-client) marks which part. For anything it does not
+implement, call the endpoint directly — the paths are in
+[Gateway REST API Endpoints](#gateway-rest-api-endpoints).
+
+The `Returns` column describes the response shape. It is not a TypeScript type:
+no TypeScript client ships, so `SlotInfo`, `GatewayStatus`, `SystemInfo` and
+their siblings are response-shape names rather than importable types.
 
 When `app_name` is set and no explicit auth is provided, the client auto-reads
 the app secret from `~/.kiro/crew/apps/{name}/.app_secret` and exchanges it
@@ -276,26 +286,26 @@ for a short-lived token via `POST /api/apps/{name}/token`.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `authenticate()` | `Promise<boolean>` | Exchange app secret for token (auto-called if appName set) |
+| `authenticate()` | `boolean` | Exchange app secret for token (auto-called if appName set) |
 | `setToken(token)` | `void` | Manually set auth token on both HTTP and WS clients |
 
 ### Connection
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `ping()` | `Promise<boolean>` | Check if Gateway is reachable |
-| `getStatus()` | `Promise<GatewayStatus>` | Gateway health (version, uptime, slots, provider) |
-| `getSystemInfo()` | `Promise<SystemInfo>` | CPU, memory, disk metrics |
+| `ping()` | `boolean` | Check if Gateway is reachable |
+| `getStatus()` | `GatewayStatus` | Gateway health (version, uptime, slots, provider) |
+| `getSystemInfo()` | `SystemInfo` | CPU, memory, disk metrics |
 
 ### Chat Slots
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `createSlot(name, agent?)` | `Promise<SlotInfo>` | Create a new chat session |
-| `listSlots()` | `Promise<SlotInfo[]>` | List all active sessions |
-| `deleteSlot(slotId)` | `Promise<void>` | Remove a session |
-| `getSlotHistory(slotId, limit?)` | `Promise<{messages, total}>` | Get slot message history |
-| `sendMessage(slotId, message)` | `Promise<void>` | Send a message (validates length, auto-flushes pending context) |
+| `createSlot(name, agent?)` | `SlotInfo` | Create a new chat session |
+| `listSlots()` | `SlotInfo[]` | List all active sessions |
+| `deleteSlot(slotId)` | `—` (no body) | Remove a session |
+| `getSlotHistory(slotId, limit?)` | `{messages, total}` | Get slot message history |
+| `sendMessage(slotId, message)` | `—` (no body) | Send a message (validates length, auto-flushes pending context) |
 
 ### WebSocket Events
 
@@ -323,21 +333,21 @@ WebSocket event types: `chat_chunk`, `chat_done`, `chat_message`, `chat_error`,
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `spawn(task, agent?)` | `Promise<string>` | Spawn a background subagent |
-| `spawnMany(tasks, agents?)` | `Promise<string[]>` | Spawn multiple subagents in parallel |
-| `listSubagents()` | `Promise<SubagentInfo[]>` | List all subagents |
-| `getSubagentStatus(id)` | `Promise<SubagentResult>` | Get subagent output |
+| `spawn(task, agent?)` | `string` | Spawn a background subagent |
+| `spawnMany(tasks, agents?)` | `string[]` | Spawn multiple subagents in parallel |
+| `listSubagents()` | `SubagentInfo[]` | List all subagents |
+| `getSubagentStatus(id)` | `SubagentResult` | Get subagent output |
 
 ### Cron Jobs
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `addCron(name, options)` | `Promise<CronJob>` | Create a scheduled job |
-| `listCrons()` | `Promise<CronJob[]>` | List all cron jobs |
-| `updateCron(id, options)` | `Promise<CronJob>` | Update a cron job |
-| `removeCron(id)` | `Promise<void>` | Delete a cron job |
-| `pauseCron(id)` | `Promise<void>` | Pause without deleting |
-| `resumeCron(id)` | `Promise<void>` | Resume a paused job |
+| `addCron(name, options)` | `CronJob` | Create a scheduled job |
+| `listCrons()` | `CronJob[]` | List all cron jobs |
+| `updateCron(id, options)` | `CronJob` | Update a cron job |
+| `removeCron(id)` | `—` (no body) | Delete a cron job |
+| `pauseCron(id)` | `—` (no body) | Pause without deleting |
+| `resumeCron(id)` | `—` (no body) | Resume a paused job |
 
 #### Watching something without paying for a model call (`kiro_crew.irq`)
 
@@ -437,44 +447,44 @@ Rules:
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `addLesson(rule, category, scope?)` | `Promise<void>` | Save a learned rule |
-| `listLessons()` | `Promise<Lesson[]>` | List all lessons |
-| `removeLesson(query)` | `Promise<void>` | Remove matching lessons |
+| `addLesson(rule, category, scope?)` | `—` (no body) | Save a learned rule |
+| `listLessons()` | `Lesson[]` | List all lessons |
+| `removeLesson(query)` | `—` (no body) | Remove matching lessons |
 
 ### Notifications
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `sendNotification(text, options?)` | `Promise<void>` | Send via Slack or dashboard |
-| `listNotifications()` | `Promise<{notifications}>` | List notifications |
-| `ackNotifications()` | `Promise<void>` | Acknowledge all notifications |
+| `sendNotification(text, options?)` | `—` (no body) | Send via Slack or dashboard |
+| `listNotifications()` | `{notifications}` | List notifications |
+| `ackNotifications()` | `—` (no body) | Acknowledge all notifications |
 
 ### Approvals
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `approveAction(slotId, taskId)` | `Promise<void>` | Approve a pending tool action |
-| `rejectAction(slotId, taskId)` | `Promise<void>` | Reject a pending tool action |
-| `resolveApproval(approvalId, approved)` | `Promise<void>` | Resolve an approval by ID |
-| `getApprovalMode()` | `Promise<'auto'\|'interactive'>` | Get current approval mode |
-| `setApprovalMode(mode)` | `Promise<void>` | Set approval mode |
+| `approveAction(slotId, taskId)` | `—` (no body) | Approve a pending tool action |
+| `rejectAction(slotId, taskId)` | `—` (no body) | Reject a pending tool action |
+| `resolveApproval(approvalId, approved)` | `—` (no body) | Resolve an approval by ID |
+| `getApprovalMode()` | `'auto'` \| `'interactive'` | Get current approval mode |
+| `setApprovalMode(mode)` | `—` (no body) | Set approval mode |
 
 ### Models
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `listModels()` | `Promise<ModelInfo[]>` | List available LLM models |
-| `setSlotModel(slotId, model)` | `Promise<void>` | Set model for a slot |
+| `listModels()` | `ModelInfo[]` | List available LLM models |
+| `setSlotModel(slotId, model)` | `—` (no body) | Set model for a slot |
 
 ### MCP Servers
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `listMcpServers()` | `Promise<McpServerInfo[]>` | List registered MCP servers |
-| `registerMcpServer(def)` | `Promise<void>` | Register an MCP server (requires name + command) |
-| `removeMcpServer(name)` | `Promise<void>` | Remove an MCP server |
-| `registerAppMcp(name, entry)` | `Promise<void>` | Write MCP entry to `~/.kiro/crew/mcp.json` (Node.js only) |
-| `unregisterAppMcp(name)` | `Promise<void>` | Remove MCP entry from `~/.kiro/crew/mcp.json` (Node.js only) |
+| `listMcpServers()` | `McpServerInfo[]` | List registered MCP servers |
+| `registerMcpServer(def)` | `—` (no body) | Register an MCP server (requires name + command) |
+| `removeMcpServer(name)` | `—` (no body) | Remove an MCP server |
+| `registerAppMcp(name, entry)` | `—` (no body) | Write MCP entry to `~/.kiro/crew/mcp.json` (Node.js only) |
+| `unregisterAppMcp(name)` | `—` (no body) | Remove MCP entry from `~/.kiro/crew/mcp.json` (Node.js only) |
 
 ### Agent & Skill Installation (Node.js only)
 
@@ -489,30 +499,30 @@ Rules:
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `dispatchAgent(agent, prompt)` | `Promise<TaskResult>` | Run agent synchronously |
-| `dispatchAgentAsync(agent, prompt)` | `Promise<string>` | Run agent in background |
-| `getTaskResult(taskId)` | `Promise<TaskResult>` | Poll task status |
+| `dispatchAgent(agent, prompt)` | `TaskResult` | Run agent synchronously |
+| `dispatchAgentAsync(agent, prompt)` | `string` | Run agent in background |
+| `getTaskResult(taskId)` | `TaskResult` | Poll task status |
 
 ### Gateway Config
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `getGatewayConfig(key)` | `Promise<Record<string, unknown>>` | Read gateway config section |
-| `setGatewayConfig(key, value)` | `Promise<void>` | Write gateway config section |
+| `getGatewayConfig(key)` | a JSON object | Read gateway config section |
+| `setGatewayConfig(key, value)` | `—` (no body) | Write gateway config section |
 
 ### App Storage
 
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `getAppDataDir()` | `string` | App-scoped data directory path |
-| `getAppConfig()` | `Promise<Record<string, unknown>>` | Read app config via REST |
-| `setAppConfig(config)` | `Promise<void>` | Write app config via REST |
+| `getAppConfig()` | a JSON object | Read app config via REST |
+| `setAppConfig(config)` | `—` (no body) | Write app config via REST |
 
 ### Memory
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `memorySearch(query, topK?)` | `Promise<MemoryResult[]>` | Semantic memory search |
+| `memorySearch(query, topK?)` | `MemoryResult[]` | Semantic memory search |
 
 ### Context Injection
 
@@ -520,8 +530,8 @@ Silent background context for LLM — content appears in the next user-initiated
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `injectContext(slotId, content, options?)` | `Promise<void>` | Inject context (null slotId = buffer locally) |
-| `flushPendingContext(slotId)` | `Promise<void>` | Flush buffered entries to a slot |
+| `injectContext(slotId, content, options?)` | `—` (no body) | Inject context (null slotId = buffer locally) |
+| `flushPendingContext(slotId)` | `—` (no body) | Flush buffered entries to a slot |
 | `setDefaultSlot(slotId)` | `void` | Auto-flush pending context on sendMessage |
 | `pendingContextCount` | `number` | Number of buffered context entries |
 
@@ -589,8 +599,16 @@ KiroCrewClient(
 
 ### Method Reference
 
-Method names use `snake_case` per Python convention. The left column is the
-canonical API-surface name used in the sections above:
+The left column is the endpoint label used in the sections above; the right
+column is the shipped Python method, in `snake_case` per Python convention.
+
+Rows marked *not implemented* are Gateway endpoints the shipped Python client
+does not wrap yet. Call those endpoints directly with `aiohttp` (or any HTTP
+client) using the paths in
+[Gateway REST API Endpoints](#gateway-rest-api-endpoints). The client also ships
+no WebSocket surface, so the `connect` / `disconnect` / `on*` handlers in
+[WebSocket Events](#websocket-events) are endpoint documentation for a raw
+WebSocket connection rather than client methods.
 
 | API surface | Python |
 |-----------|--------|
@@ -600,7 +618,7 @@ canonical API-surface name used in the sections above:
 | `createSlot(name, agent?)` | `create_slot(name, agent="")` |
 | `listSlots()` | `list_slots()` |
 | `deleteSlot(id)` | `delete_slot(id)` |
-| `getSlotHistory(id, limit?)` | `get_slot_history(id, limit=50)` |
+| `getSlotHistory(id, limit?)` | *not implemented — call the endpoint* |
 | `sendMessage(id, msg)` | `send_message(id, msg)` |
 | `spawn(task, agent?)` | `spawn(task, agent="")` |
 | `spawnMany(tasks, agents?)` | `spawn_many(tasks, agents=None)` |
@@ -616,26 +634,26 @@ canonical API-surface name used in the sections above:
 | `listLessons()` | `list_lessons()` |
 | `removeLesson(query)` | `remove_lesson(query)` |
 | `sendNotification(text, opts?)` | `send_notification(text, **opts)` |
-| `listNotifications()` | `list_notifications()` |
-| `ackNotifications()` | `ack_notifications()` |
-| `approveAction(slot, task)` | `approve_action(slot, task)` |
-| `rejectAction(slot, task)` | `reject_action(slot, task)` |
-| `resolveApproval(id, ok)` | `resolve_approval(id, ok)` |
-| `getApprovalMode()` | `get_approval_mode()` |
-| `setApprovalMode(mode)` | `set_approval_mode(mode)` |
-| `listModels()` | `list_models()` |
-| `setSlotModel(slot, model)` | `set_slot_model(slot, model)` |
-| `getGatewayConfig(key)` | `get_gateway_config(key)` |
-| `setGatewayConfig(key, val)` | `set_gateway_config(key, val)` |
+| `listNotifications()` | *not implemented — call the endpoint* |
+| `ackNotifications()` | *not implemented — call the endpoint* |
+| `approveAction(slot, task)` | *not implemented — call the endpoint* |
+| `rejectAction(slot, task)` | *not implemented — call the endpoint* |
+| `resolveApproval(id, ok)` | *not implemented — call the endpoint* |
+| `getApprovalMode()` | *not implemented — call the endpoint* |
+| `setApprovalMode(mode)` | *not implemented — call the endpoint* |
+| `listModels()` | *not implemented — call the endpoint* |
+| `setSlotModel(slot, model)` | *not implemented — call the endpoint* |
+| `getGatewayConfig(key)` | *not implemented — call the endpoint* |
+| `setGatewayConfig(key, val)` | *not implemented — call the endpoint* |
 | `listMcpServers()` | `list_mcp_servers()` |
 | `registerMcpServer(def)` | `register_mcp_server(name, cmd, args?, env?)` |
 | `removeMcpServer(name)` | `remove_mcp_server(name)` |
-| `registerAppMcp(name, entry)` | `register_app_mcp(name, *, url?, cmd?, ...)` |
-| `unregisterAppMcp(name)` | `unregister_app_mcp(name)` |
-| `installAgentConfig(name, cfg)` | `install_agent_config(name, cfg)` |
-| `removeAgentConfig(name)` | `remove_agent_config(name)` |
-| `installSkill(name, dir)` | `install_skill(name, dir)` |
-| `removeSkill(name)` | `remove_skill(name)` |
+| `registerAppMcp(name, entry)` | *not implemented — call the endpoint* |
+| `unregisterAppMcp(name)` | *not implemented — call the endpoint* |
+| `installAgentConfig(name, cfg)` | *not implemented — call the endpoint* |
+| `removeAgentConfig(name)` | *not implemented — call the endpoint* |
+| `installSkill(name, dir)` | *not implemented — call the endpoint* |
+| `removeSkill(name)` | *not implemented — call the endpoint* |
 | `dispatchAgent(agent, prompt)` | `dispatch_agent(agent, prompt)` |
 | `dispatchAgentAsync(agent, prompt)` | `dispatch_agent_async(agent, prompt)` |
 | `getTaskResult(id)` | `get_task_result(id)` |
@@ -651,7 +669,7 @@ canonical API-surface name used in the sections above:
 
 | API surface | Python |
 |-----------|--------|
-| `verifyProxyRequest(req, appName, opts?)` | `verify_proxy_request(request, app_name, *, secret?, max_age_secs?)` |
+| `verifyProxyRequest(req, appName, opts?)` | *not implemented — call the endpoint* |
 | — | `verify_proxy_request_raw(header, method, path, app_name, ...)` |
 
 ---

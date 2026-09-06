@@ -37,6 +37,8 @@ organized for someone browsing the repository.
 | [inbound-webhooks.md](inbound-webhooks.md) | Letting external systems trigger an agent turn over HTTP. |
 | [deploy-web.md](deploy-web.md) | Publishing artifacts to a public HTTPS URL on your own AWS. |
 | [snapshot-and-restore.md](snapshot-and-restore.md) | Backing up and restoring Kiro Crew state. |
+| [workflows.md](workflows.md) | Multi-phase agent runs you can watch, restart in part, and save for reuse. |
+| [secrets-vault.md](secrets-vault.md) | Storing credentials encrypted where the agent cannot read them. |
 
 ## Channels
 
@@ -51,6 +53,8 @@ organized for someone browsing the repository.
 | [weixin-integration.md](weixin-integration.md) | Weixin setup, and the risks to read first. |
 | [whatsapp-integration.md](whatsapp-integration.md) | WhatsApp (QR-linked personal account) setup, and the risks to read first. |
 | [feishu-integration.md](feishu-integration.md) | Feishu (Lark/飞书) setup and behavior. |
+| [imessage-integration.md](imessage-integration.md) | iMessage setup and behavior on a Mac that owns the Messages database. |
+| [channel-capabilities.md](channel-capabilities.md) | One matrix of what every channel can do: streaming, buttons, uploads, reply length, approval timeout. |
 | [messaging-transport.md](messaging-transport.md) | The channel-neutral contracts every transport shares. |
 
 ## Platform

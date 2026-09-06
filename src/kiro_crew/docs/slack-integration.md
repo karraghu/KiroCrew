@@ -120,7 +120,7 @@ When Kiro Crew presents choices, they render as interactive Block Kit buttons.
 Click a button to send that choice back to the conversation. You can select
 multiple options before submitting.
 
-## Sharing Access
+## Access control
 
 > ⚠️ **Multi-user Slack access is currently disabled for security.** Kiro Crew
 > is restricted to the bot owner only. The `!allowlist` command and
@@ -207,3 +207,9 @@ Secrets land in `config_dir/.env` via atomic 0600 writes; `os.environ` is
 synced after saves so status reads stay truthful. `allowed_users` /
 `open_channels` are intentionally not exposed while the runtime enforces
 owner-only access.
+
+## Related docs
+
+- [Channel capabilities](channel-capabilities.md): the ten-channel matrix — streaming, buttons, uploads, reply length, approval timeout
+- [Getting Started](getting-started.md): install, first run, connecting a channel
+- [Configuration](configuration.md): the config file and environment variables

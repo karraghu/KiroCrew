@@ -38,6 +38,12 @@ index, first-time setup, and connecting messaging channels.
 | Chat Channels | DM-based chat with tool approval — [Slack](slack-integration.md), [Discord](discord-integration.md), [Telegram](telegram-integration.md), [Teams](teams-integration.md), [Webex](webex-integration.md), [WeCom](wecom-integration.md), [WeChat](weixin-integration.md), [iMessage](imessage-integration.md), [WhatsApp](whatsapp-integration.md), [Feishu](feishu-integration.md); per-channel capabilities in each guide |
 | [Agents](agents.md) | Switch between specialized agents per conversation, thread, or cron job |
 | [Skills](skills.md) | Drop-in markdown knowledge packs for domain-specific workflows |
+| [Dynamic Workflows](workflows.md) | Multi-phase agent orchestration authored from a plain-language goal: watch a run, restart part of it from cache, save it for reuse |
+| [Artifacts](dashboard.md) | Save, version, and revert generated UI and documents so they outlive the chat scrollback |
+| [Monitor Loops](subagents.md) | Keep one session checking something on an idle interval — a pull request, a CI run, a deployment — until an exit condition fires |
+| [Session Ledger](task-runner.md) | A durable per-session record of goal, phase, and next step that survives context compaction |
+| [Browser Control](configuration.md) | Drive a real web page from the dashboard's Browser panel: navigate, snapshot, click, type, screenshot |
+| [Computer Use](configuration.md) | Read and drive native desktop applications through the accessibility layer; opt-in and off by default |
 
 ## Additional Features
 
@@ -53,6 +59,34 @@ index, first-time setup, and connecting messaging channels.
 | [Cooperative Stop](dashboard.md) | Stop sends a cancel first and only hard-kills after a budget, so session state survives |
 | [Streaming Speech-to-Text](configuration.md) | Live transcription partials in the dashboard input, with local Whisper or optional AWS Transcribe |
 | [Warm Pool](configuration.md) | Keep kiro-cli processes pre-spawned so a new session starts instantly |
+| [Secrets Vault](secrets-vault.md) | Credentials encrypted on disk and refused to the agent, with a `secret://` reference left in `.env` |
+
+## Settings reference
+
+Settings is organized into tabs. Several have a full guide; the rest are
+documented by their own in-panel help.
+
+| Tab | Covers | Guide |
+|---|---|---|
+| Overview | Gateway status and the settings you change most | — |
+| Imports | Bringing configuration in from another install | [Snapshot and restore](snapshot-and-restore.md) |
+| Chat | Composer behaviour, queued messages, feature tips | [Feature Tips](feature-tips.md) |
+| Display | Theme, language, and layout | — |
+| Voice | Speech-to-text and spoken replies | [Configuration](configuration.md) |
+| Notifications | Where a proactive message is delivered | — |
+| Shortcuts | Keyboard bindings | — |
+| Skills | Installed skills and where they are loaded from | [Skills](skills.md) |
+| Channels | Per-channel setup and access control | [Channel capabilities](channel-capabilities.md) |
+| Browser | Installing the browser CLI and the attach token | — |
+| Computer Use | Driving native desktop apps; off by default | — |
+| Webhooks | Inbound tokens and request signing | [Inbound webhooks](inbound-webhooks.md) |
+| Instances | Additional gateways this dashboard can reach | — |
+| Privacy | What leaves the host | [Snapshot and restore](snapshot-and-restore.md) |
+| Security | The sandbox, denied commands, and the audit log | [Blocked commands](blocked-commands.md) |
+| Secrets | The encrypted credential vault | [Secrets vault](secrets-vault.md) |
+| Developer | Logs, metrics, storage, agent backend, feature previews | [Dashboard](dashboard.md) |
+| Releases | Update channel and version | [Getting Started](getting-started.md) |
+| About | Version and links | — |
 
 ## Chat Channels
 
