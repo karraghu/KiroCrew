@@ -24,7 +24,9 @@ import logging
 import os
 import re
 import stat
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 
 from kiro_crew import platform_compat
@@ -321,6 +323,161 @@ def member_slot_key(slug: str) -> str:
     use the slot layer's RETURNED key as the source of truth.
     """
     return DM_SLOT_KEY_PREFIX + validate_slug(slug)
+
+
+def member_thread_session_alias(slug: str) -> str:
+    """Canonical session-map alias for a member's pinned DM thread.
+
+    ``dashboard:<slot key>`` — the spelling the session manager and the
+    conversation log key a member thread under (see
+    :func:`is_member_session_key` for the full set of prefixes a member key
+    travels through). This is the ONE derivation every out-of-turn touch of a
+    member session goes through — flagging the warm session for re-injection
+    after a rules write, probing the thread's on-disk history — so the key
+    format lives here rather than being hand-built at each site, where one
+    divergent spelling would silently orphan the invariant it serves.
+    """
+    return f"dashboard:{member_slot_key(slug)}"
+
+
+class MemberLifecycle(str, Enum):
+    """Session-lifecycle states a turn can arrive in, as the member-context
+    chokepoint distinguishes them.
+
+    Derived by :func:`member_lifecycle` from the same inputs
+    ``build_message`` already branches on, so the two can never disagree on
+    what state a turn is in:
+
+    * ``FRESH`` — brand-new session; the full session context is built and
+      injected.
+    * ``SLIM_RESUME`` — the provider restored the native transcript
+      (``session/load``); only a minimal header is injected, but the restored
+      member section may be stale.
+    * ``WARM_REINJECTION`` — follow-up turn whose session-start context was
+      compacted away (or deliberately invalidated, e.g. by a rules write);
+      the one-shot re-injection flag was consumed for this turn.
+    * ``WARM`` — ordinary follow-up turn; the delivered section is still live
+      in the provider conversation.
+    * ``MINIMAL`` — minimal-context turn (cron); never a member thread by
+      contract (``member`` is ``""`` on every such call).
+    """
+
+    FRESH = "fresh"
+    SLIM_RESUME = "slim_resume"
+    WARM_REINJECTION = "warm_reinjection"
+    WARM = "warm"
+    MINIMAL = "minimal"
+
+    @property
+    def delivers_section(self) -> bool:
+        """Whether a member turn in this state injects the CURRENT section.
+
+        The lifecycle half of the chokepoint's verdict, exposed on the enum so
+        a caller that knows a turn is member-shaped without holding the member
+        NAME (the chat runner records delivery-at-stake the moment the session
+        client exists, before the context build resolves the name) reads the
+        same single source of truth :func:`member_turn_context` does.
+        """
+        return self in (
+            MemberLifecycle.FRESH,
+            MemberLifecycle.SLIM_RESUME,
+            MemberLifecycle.WARM_REINJECTION,
+        )
+
+
+@dataclass(frozen=True)
+class MemberTurnContext:
+    """What the member layer must do on ONE turn — the chokepoint's verdict.
+
+    Exactly one of the two flags is set for a member turn (both are ``False``
+    only when the turn carries no member, or on ``MINIMAL`` turns, which
+    carry no member by contract):
+
+    * ``deliver_section`` — inject the CURRENT four-layer member section this
+      turn. Delivery itself enforces the rules gate: the section builder
+      reads the user's [PERMANENT RULES] fresh, and an existing-but-unreadable
+      rules file aborts the turn (fail closed) instead of running the member
+      unbounded.
+    * ``enforce_rules_gate`` — the section is already live in the provider
+      conversation, so nothing is injected, but the fail-closed rules read
+      still runs: a first-turn abort leaves a warm session, and without this
+      per-turn check the member would keep running after its rules file went
+      unreadable.
+    """
+
+    member: str
+    lifecycle: MemberLifecycle
+    deliver_section: bool
+    enforce_rules_gate: bool
+
+
+def member_lifecycle(
+    *,
+    is_new_session: bool,
+    resumed: bool,
+    minimal_context: bool,
+    needs_reinjection: bool,
+) -> MemberLifecycle:
+    """Map ``build_message``'s branch inputs to one lifecycle state.
+
+    Mirrors the branch structure of ``build_message`` exactly — including the
+    precedence quirks a hand-written table would have to document:
+    ``minimal_context`` beats ``resumed`` (a minimal resumed build early-returns
+    before any member handling), and ``needs_reinjection`` only matters on warm
+    turns (on a new session the full/slim injection path already delivers).
+    """
+    if is_new_session:
+        if minimal_context:
+            return MemberLifecycle.MINIMAL
+        if resumed:
+            return MemberLifecycle.SLIM_RESUME
+        return MemberLifecycle.FRESH
+    if needs_reinjection:
+        return MemberLifecycle.WARM_REINJECTION
+    return MemberLifecycle.WARM
+
+
+def member_turn_context(member: str, lifecycle: MemberLifecycle) -> MemberTurnContext:
+    """THE decision point for the rules-currency invariant.
+
+    Invariant: **every member turn runs under the user's CURRENT rules.**
+    Every lifecycle state satisfies it one of two ways — deliver the current
+    section (which reads the rules, fail closed), or run the standalone
+    fail-closed rules read against the section already live in the provider
+    conversation. All delivery branches call this function instead of
+    branching by hand, so a future lifecycle state added to ``build_message``
+    cannot silently skip both the member section and the rules gate: it has
+    to be given a verdict here first, where the mapping is pinned by tests.
+
+    ``MINIMAL`` is the one deliberate exception — such turns are never member
+    threads (``member`` is ``""`` by contract at every call site), and a
+    member name arriving anyway gets neither delivery nor gate, exactly as
+    the branch structure disposes of it (the minimal build early-returns
+    before any member handling).
+
+    An empty *member* means the turn has no member layer at all: nothing is
+    delivered and nothing is gated, whatever the lifecycle.
+    """
+    # Deny by default. Both verdict predicates are identity/membership tests
+    # that answer False for anything that is not a genuine enum member — and
+    # the str mixin makes a bare "warm" compare EQUAL to the member while
+    # failing both — so an unrecognized lifecycle would otherwise yield the
+    # one combination the invariant forbids (no delivery, no gate) silently,
+    # at the single decision point the invariant rests on. Refuse loudly
+    # instead.
+    if not isinstance(lifecycle, MemberLifecycle):
+        raise TypeError(f"lifecycle must be MemberLifecycle, got {lifecycle!r}")
+    if not member:
+        return MemberTurnContext(
+            member="", lifecycle=lifecycle, deliver_section=False, enforce_rules_gate=False
+        )
+    gate = lifecycle is MemberLifecycle.WARM
+    return MemberTurnContext(
+        member=member,
+        lifecycle=lifecycle,
+        deliver_section=lifecycle.delivers_section,
+        enforce_rules_gate=gate,
+    )
 
 
 def read_dm_binding(slug: str) -> dict | None:

@@ -210,7 +210,7 @@ from kiro_crew.llm_helpers import (
     usage_has_billing,
 )
 from kiro_crew.mcp_discovery import kirocrew_managed_names
-from kiro_crew.members import record_activity
+from kiro_crew.members import member_lifecycle, record_activity
 from kiro_crew.messaging.display_safety import redact_for_display
 from kiro_crew.messaging.identity import publish_turn_identity
 from kiro_crew.messaging.link import (
@@ -6547,8 +6547,24 @@ async def _run_chat(
         # return between this point and build_message (a blocked/oversized
         # @prompt expansion, a pre-build abort) leaves a warm session whose
         # member section was never delivered, and the finally-block re-arm
-        # reads this flag to make the next turn re-deliver it.
-        _member_session_start_pending = bool(slot.mode == "member" and is_new)
+        # reads this flag to make the next turn re-deliver it. The
+        # delivery-at-stake verdict is the chokepoint's own
+        # (MemberLifecycle.delivers_section — the same source
+        # member_turn_context reads), keyed on the slot's member MODE rather
+        # than the member name: the name is resolved later, at the context
+        # build, and delivery is at stake from this point regardless.
+        # needs_reinjection is pinned False: the one-shot flag is not consumed
+        # until the context build, and an aborted WARM_REINJECTION delivery is
+        # covered by _needs_reinjection in the same finally-block re-arm.
+        _member_session_start_pending = (
+            slot.mode == "member"
+            and member_lifecycle(
+                is_new_session=is_new,
+                resumed=resumed,
+                minimal_context=False,
+                needs_reinjection=False,
+            ).delivers_section
+        )
         # Member activity pointer — once per SESSION, not per turn: the log
         # answers "which sessions did this member take part in", so a per-turn
         # append would inflate every count taken from it. `slot.agent` is the

@@ -201,7 +201,11 @@ async def api_members(request: web.Request) -> web.Response:
         for row in rows:
             if not row["slot_key"]:
                 continue
-            log_key = f"dashboard:{row['slot_key']}"
+            # A non-empty slot_key came from read_dm_binding, which refuses
+            # any binding whose slot_key is not the slug's own derivation —
+            # so the canonical alias helper reads the same key the binding
+            # names, and the alias format stays owned by ONE function.
+            log_key = members_mod.member_thread_session_alias(row["slug"])
             mt = state.conversation_log.session_mtime(log_key)
             if not mt:
                 continue
@@ -310,7 +314,7 @@ async def api_member_thread(request: web.Request) -> web.Response:
         # the crew). A member key with NO history binds fresh as usual.
         if member_name and state.conversation_log is not None:
             _log = state.conversation_log
-            _history_key = f"dashboard:{members_mod.member_slot_key(slug)}"
+            _history_key = members_mod.member_thread_session_alias(slug)
             # STRUCTURAL existence, not metadata truthiness: get_metadata
             # answers {} for both "never persisted" and "present but
             # malformed/unreadable", and treating the second as the first
@@ -733,7 +737,7 @@ async def api_member_rules_put(request: web.Request) -> web.Response:
     # teardown needed — and the flag is a no-op when no session is warm.
     try:
         state: DashboardState = request.app["state"]
-        state.sessions.mark_needs_reinjection(f"dashboard:{members_mod.member_slot_key(slug)}")
+        state.sessions.mark_needs_reinjection(members_mod.member_thread_session_alias(slug))
     except Exception:
         # Best-effort: the write LANDED (the durable state is correct), and a
         # cold session picks the new rules up at its next start regardless.

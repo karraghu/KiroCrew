@@ -32,9 +32,12 @@ from kiro_crew.hooks import (
 )
 from kiro_crew.learn import LessonStore
 from kiro_crew.members import (
+    MemberLifecycle,
     MemberSlugError,
     member_briefing_path,
     member_briefing_supported,
+    member_lifecycle,
+    member_turn_context,
     read_member_briefing,
     read_member_rules,
     slug_for_name,
@@ -2691,7 +2694,14 @@ class ContextBuilder:
         # (product-owned, backend-gated) and reads first so the four layers —
         # including the user-owned rules — rank below product protocol, per
         # the earlier-outranks-later convention of this preamble.
-        if member:
+        #
+        # FRESH leg of the member lifecycle: reaching this line means a full
+        # (non-minimal) session-start build — the minimal path early-returned
+        # above — so the verdict comes from the same chokepoint every other
+        # delivery branch consults (kiro_crew.members.member_turn_context).
+        # Delivery enforces the rules gate: the section builder reads
+        # [PERMANENT RULES] fresh and fails closed on an unreadable file.
+        if member_turn_context(member, MemberLifecycle.FRESH).deliver_section:
             _member_section = self._build_member_section(member)
             if _member_section:
                 parts.append(_member_section)
@@ -3115,28 +3125,40 @@ class ContextBuilder:
         is_cc = is_claude_code(provider_type)
 
         # Layer-3 rules gate + section delivery, per session-lifecycle branch.
-        # The INVARIANT (GPT rounds 1-2 in this span): every member turn
-        # passes the fail-closed rules gate, and every turn whose live context
-        # cannot be carrying the CURRENT member section gets it injected
-        # fresh. By branch:
-        #   1. fresh session          -> build_session_context injects the
-        #      full section; the rules read inside enforces the gate.
-        #   2. warm + reinjection     -> the post-compaction block below
-        #      re-injects the current section; same gate inside.
-        #   3. warm, no reinjection   -> THIS block validates rules per-turn
-        #      (a first-turn abort leaves a warm session — the provider
-        #      client survives the raise — and without this the member would
-        #      run with no bounds); the delivered section is still live in
-        #      the provider conversation, so no re-injection.
-        #   4. slim resume            -> handled inside the is_new_session
-        #      branch below: session/load restored the ORIGINAL section,
-        #      whose [PERMANENT RULES] may have changed or become unreadable
-        #      while the session idled, so the CURRENT section is re-injected
-        #      (and its rules read keeps the gate).
-        #   5. minimal_context (cron) -> never a member thread; member is "".
+        # The INVARIANT: every member turn passes the fail-closed rules gate,
+        # and every turn whose live context cannot be carrying the CURRENT
+        # member section gets it injected fresh. The decision lives in ONE
+        # chokepoint — kiro_crew.members.member_turn_context — which every
+        # delivery branch below consults instead of branching by hand, so a
+        # future session-lifecycle branch added here cannot silently skip
+        # both the member section and the rules gate. Per lifecycle state:
+        #   FRESH            -> build_session_context injects the full
+        #      section; the rules read inside enforces the gate.
+        #   WARM_REINJECTION -> the post-compaction block below re-injects
+        #      the current section; same gate inside.
+        #   WARM             -> THIS block validates rules per-turn (a
+        #      first-turn abort leaves a warm session — the provider client
+        #      survives the raise — and without this the member would run
+        #      with no bounds); the delivered section is still live in the
+        #      provider conversation, so no re-injection.
+        #   SLIM_RESUME      -> handled inside the is_new_session branch
+        #      below: session/load restored the ORIGINAL section, whose
+        #      [PERMANENT RULES] may have changed or become unreadable while
+        #      the session idled, so the CURRENT section is re-injected (and
+        #      its rules read keeps the gate).
+        #   MINIMAL (cron)   -> never a member thread; member is "".
         # Missing file still reads as "" (the normal unbounded-by-choice
         # state); a bad slug degrades like the builder.
-        if member and not is_new_session and not needs_reinjection:
+        _member_turn = member_turn_context(
+            member,
+            member_lifecycle(
+                is_new_session=is_new_session,
+                resumed=resumed,
+                minimal_context=minimal_context,
+                needs_reinjection=needs_reinjection,
+            ),
+        )
+        if _member_turn.enforce_rules_gate:
             try:
                 _member_slug: str | None = slug_for_name(member)
             except (MemberSlugError, ValueError):
@@ -3154,7 +3176,14 @@ class ContextBuilder:
             # into the same window and accelerates compaction. Inject only the
             # minimal header (fresh date/time + identity) plus a resume marker
             # so the model knows where the full context lives.
-            slim_resume = resumed and not minimal_context
+            #
+            # Derived FROM the chokepoint's lifecycle rather than re-encoding
+            # ``resumed and not minimal_context`` here: two independent
+            # spellings of the same predicate can drift apart, and the member
+            # re-injection below keys off the lifecycle — a divergence would
+            # leave a resumed member session running on a stale
+            # [PERMANENT RULES] snapshot with nothing failing.
+            slim_resume = _member_turn.lifecycle is MemberLifecycle.SLIM_RESUME
             # Agent prompt goes BEFORE session context wrapper
             # so the LLM treats it as its identity, not background info.
             if slim_resume:
@@ -3247,18 +3276,18 @@ class ContextBuilder:
                         if _agent_includes_crew_context(agent)
                         else ""
                     )
-                    # Branch 4 of the member lifecycle table (see the layer-3
-                    # gate above): the restored transcript carries the
-                    # ORIGINAL member section, but [PERMANENT RULES] may have
-                    # changed — or become unreadable — while the session
-                    # idled. Re-inject the CURRENT section so the boundary the
-                    # member runs under is the one the user set, not a stale
-                    # snapshot; the rules read inside keeps the fail-closed
-                    # gate on this branch. Same marker scrub as the
-                    # post-compaction path: the slim-resume tail is scrubbed
-                    # above, but this section is appended separately.
+                    # SLIM_RESUME leg of the member lifecycle (see the
+                    # chokepoint consult above): the restored transcript
+                    # carries the ORIGINAL member section, but [PERMANENT
+                    # RULES] may have changed — or become unreadable — while
+                    # the session idled. Re-inject the CURRENT section so the
+                    # boundary the member runs under is the one the user set,
+                    # not a stale snapshot; the rules read inside keeps the
+                    # fail-closed gate on this branch. Same marker scrub as
+                    # the post-compaction path: the slim-resume tail is
+                    # scrubbed above, but this section is appended separately.
                     _resume_member = ""
-                    if member:
+                    if _member_turn.deliver_section:
                         _member_section = self._build_member_section(member)
                         if _member_section:
                             _resume_member = (
@@ -3372,8 +3401,10 @@ class ContextBuilder:
             # must be applied here or a forged [CURRENT USER REQUEST —] in the
             # agent-writable briefing would ride the reinjection turn as an
             # authoritative request. The genuine member headers are not in
-            # _STRUCTURAL_MARKER_RES, so they survive intact.
-            if member:
+            # _STRUCTURAL_MARKER_RES, so they survive intact. This is the
+            # WARM_REINJECTION leg of the member lifecycle (see the
+            # chokepoint consult above).
+            if _member_turn.deliver_section:
                 _member_section = self._build_member_section(member)
                 if _member_section:
                     parts.append(_neutralize_structural_markers(_member_section))
