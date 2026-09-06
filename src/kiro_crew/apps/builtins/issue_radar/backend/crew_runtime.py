@@ -771,11 +771,66 @@ async def wake_crew(
 ) -> bool:
     """Give the crew a turn NOW because a signal moved. Returns whether a turn started.
 
+    The wake proper is :func:`_wake_crew_body`; what this wrapper adds is the ONE
+    exit every path out of it goes through. The auto-approve grant is minted from a
+    record read before an ``await`` (``sync_trust``, off the loop), so any path that
+    returns without re-checking can leave a grant the pause route had ALREADY
+    revoked standing on a crew a human stopped — a resurrected grant, not merely a
+    late one. Guarding each ``return`` individually does not close that: it cannot
+    cover the exception path at all, and every instance found so far was a return
+    nobody had listed yet.
+
+    So the check lives in a ``finally``, where a ``return`` added anywhere in the
+    body cannot bypass it: re-read the record and revoke unless it comes back
+    readable AND live. ``revoke_crew_execution`` is idempotent and best-effort, so
+    the paths that already revoked pay nothing and a failure here cannot turn a
+    successful wake into an exception.
+
+    WHY AN OFF-LOOP READ IS ENOUGH, since the read's own thread hop is a window too:
+    every stop path writes the record BEFORE it revokes — ``crew_routes``'
+    ``_revoke_execution`` runs after ``set_crew_paused``/``retire_crew`` and
+    documents that the record is already written when it is reached. So a grant that
+    outlived a stop must have been minted AFTER that stop's revocation, hence after
+    its record write; and this read starts later still, so it cannot miss it. A stop
+    whose write lands after this read is not one this wake raced: its own inline
+    revocation stops the crew, and the grant is re-checked on every approval rather
+    than sampled once.
+
+    The guarantee, stated as the invariant it is: **when ``wake_crew`` returns, no
+    auto-approve grant survives a stop that was already written to the store.**
+    """
+    try:
+        return await _wake_crew_body(state, owner, repo, crew, reason, root, key)
+    finally:
+        current = await _current_crew(owner, repo, crew, root)
+        if current is None or not is_live(current):
+            await revoke_crew_execution(state, current or crew, "stopped while waking")
+
+
+async def _wake_crew_body(
+    state: Any,
+    owner: str,
+    repo: str,
+    crew: dict[str, Any],
+    reason: str = "",
+    root: Path | None = None,
+    key: provider.RepoKey | None = None,
+) -> bool:
+    """Give the crew a turn NOW because a signal moved. Returns whether a turn started.
+
     Two writes, both needed. The armed loop's message is refreshed so an idle-timer
     fire that lands later carries the CURRENT snapshot instead of the one composed
     at launch; and the prompt is dispatched immediately, because the whole point of
     the sweep is that the crew does not wait out an idle gap after CI turns red.
     ``enqueue_or_run_prompt`` queues instead of racing when the crew is mid-turn.
+
+    The ``crew`` argument is the sweep's snapshot and a pause writes only to the
+    store, so liveness is re-read from the store before the grant and again before
+    the dispatch. Without them a pause landing anywhere in this function is
+    invisible here and the crew spends one auto-approved turn after being stopped.
+
+    Called only through :func:`wake_crew`, whose ``finally`` is what makes those
+    checks cover the paths this function returns on without reaching the dispatch.
     """
     slot = state.get_slot(str(crew.get("slot_key") or f"crew-{crew.get('id')}"))
     if slot is None:
@@ -785,6 +840,18 @@ async def wake_crew(
             "issue-radar crew %s: no session to wake (%s)", crew.get("id"), reason or "signal"
         )
         return False
+    at_grant = await _current_crew(owner, repo, crew, root)
+    if at_grant is None:
+        # No readable record: FAIL CLOSED. The grant is a governance control, so an
+        # unreadable record is not permission to keep granting from a snapshot whose
+        # liveness nothing can confirm. ``wake_crew``'s finally revokes.
+        logger.warning(
+            "issue-radar crew %s: no readable record, wake refused (%s)",
+            crew.get("id"),
+            reason or "signal",
+        )
+        return False
+    crew = at_grant
     await asyncio.to_thread(sync_trust, slot, crew)
     prompt = await compose_turn_prompt_async(slot, owner, repo, crew, root, key)
     svc = _autonudge_instance() if _autonudge_instance is not None else None
@@ -805,6 +872,34 @@ async def wake_crew(
         # turn anyway — the wake buys latency, it does not carry information.
         logger.info(
             "issue-radar crew %s: mid-turn, wake dropped (%s)",
+            crew.get("id"),
+            reason or "signal",
+        )
+        return False
+    # The last check before the turn, and a re-read rather than a look at ``crew``
+    # because composing the prompt and refreshing the loop message are both awaits:
+    # the record can have moved since the grant. Revoking is left to
+    # :func:`wake_crew`'s finally, which every exit here passes through — and which
+    # documents why reading off the loop cannot miss a stop.
+    at_dispatch = await _current_crew(owner, repo, crew, root)
+    if at_dispatch is None or not is_live(at_dispatch):
+        logger.info(
+            "issue-radar crew %s: stopped while waking, no turn dispatched (%s)",
+            crew.get("id"),
+            reason or "signal",
+        )
+        return False
+    if not is_live(crew):
+        # Live NOW, but stopped when the grant was assigned — so the grant is gone,
+        # and re-granting here would mint one from a record the check above has
+        # already superseded. DROP the wake instead of dispatching an unattended
+        # crew with no grant, which would park it on an approval prompt nobody is
+        # watching. Dropping costs nothing for the reason the mid-turn branch above
+        # gives: the loop's message was just refreshed, the crew reconciles every
+        # open item at the top of its next turn, and the watchdog re-grants within a
+        # cycle. The wake buys latency; it carries no information.
+        logger.info(
+            "issue-radar crew %s: resumed mid-wake, wake dropped (%s)",
             crew.get("id"),
             reason or "signal",
         )
@@ -835,6 +930,40 @@ async def _rehydrate(state: Any, slot_key: str) -> Any:
     except Exception:  # pragma: no cover - defensive
         logger.debug("issue-radar: rehydrate failed for %s", slot_key, exc_info=True)
         return None
+
+
+async def _current_crew(
+    owner: str, repo: str, crew: dict[str, Any], root: Path | None = None
+) -> dict[str, Any] | None:
+    """The crew's record as the store holds it NOW, or ``None`` if it cannot be read.
+
+    Liveness is durable state and every caller here holds a SNAPSHOT of it. A pause
+    writes ``paused_reason`` through ``crew_store`` and can reach no snapshot any
+    caller is holding, so ``is_live`` on a snapshot taken before an ``await`` reads
+    live for a crew that is already stopped — and the two things that follow, the
+    auto-approve grant and the turn itself, are exactly what a pause exists to
+    prevent. Re-reading immediately before them is what makes the check current.
+
+    OFF the loop, like every other store read here, and that is not a weakness of
+    the check: :func:`wake_crew` documents why the read's own thread hop cannot hide
+    a stop. The record carries operator free text (``extra_prompt``) that the write
+    path length-checks no further than "is a string", so parsing it on the loop would
+    put an unbounded blocking read on the gateway's only thread — precisely the
+    hazard ``no-blocking-call-on-event-loop`` exists for.
+
+    ``None``, never the caller's snapshot, when there is no readable record — FAIL
+    CLOSED. Falling back to the snapshot would answer a governance question with the
+    very value whose staleness is in question, so a record that is missing, corrupt
+    or unreadable would go on authorizing turns from it. Every caller here is handed
+    crews listed from the same store and root, so a readable record is the ordinary
+    case and ``None`` means something is genuinely wrong; treating that as stopped
+    costs at most one cycle's turn and repairs itself on the next read.
+    """
+    crew_id = str(crew.get("id") or "")
+    if not crew_id:
+        return None
+    fresh = await asyncio.to_thread(crew_store.read_crew, owner, repo, crew_id, root)
+    return fresh if isinstance(fresh, dict) else None
 
 
 # ── the watchdog (one pass per poll cycle) ──────────────────────────────────
@@ -1087,10 +1216,7 @@ async def watchdog_cycle(
     for crew in crews:
         slot_key = str(crew.get("slot_key") or f"crew-{crew.get('id')}")
         slot = state.get_slot(slot_key) if hasattr(state, "get_slot") else None
-        if not is_live(crew):
-            await revoke_crew_execution(state, crew, "not live")
-            continue
-        if slot is None:
+        if slot is None and is_live(crew):
             # A live crew with no resident slot: a restart, or a tab someone
             # closed. Rehydrate HERE and not only in the ``loop is None`` branch
             # below, because a PERSISTED loop fires against the slot key whether
@@ -1099,24 +1225,43 @@ async def watchdog_cycle(
             # crew parks on an approval nobody is there to answer. Rehydration
             # first, so the crew keeps its own transcript (and its brief).
             slot = await _rehydrate(state, slot_key)
+        # UNCONDITIONALLY, and not only on the branch that rehydrated. The roster
+        # was read before this pass and every crew ahead of this one in the loop
+        # awaited, so a resident crew's snapshot is just as stale as a rehydrated
+        # one's — and everything below decides on it: the grant, the launch, and
+        # switching the crew's clock back on.
+        current = await _current_crew(owner, repo, crew, root)
+        if current is None or not is_live(current):
+            await revoke_crew_execution(state, crew, "not live")
+            continue
+        crew = current
         if slot is not None:
             await asyncio.to_thread(sync_trust, slot, crew)
-        if svc is None:
-            continue
-        loop = svc.get_by_slot(slot_key)
-        if loop is None:
-            # No loop for a live crew: either it has never been launched or a
-            # restart lost it. Launching is idempotent on the slot key.
-            await launch_crew(state, owner, repo, crew, root, key)
-            continue
-        if slot is None:
-            # Loop but still no slot — nothing on disk to rehydrate from (a crew
-            # armed and then never given a turn). ``ensure_crew_session`` creates
-            # the session and establishes trust the same way launch does, without
-            # re-arming a loop that already exists.
-            await ensure_crew_session(state, owner, repo, crew)
-        if not loop.active:
-            await svc.update(loop.id, active=True)
+        if svc is not None:
+            loop = svc.get_by_slot(slot_key)
+            if loop is None:
+                # No loop for a live crew: either it has never been launched or a
+                # restart lost it. Launching is idempotent on the slot key.
+                await launch_crew(state, owner, repo, crew, root, key)
+            else:
+                if slot is None:
+                    # Loop but still no slot — nothing on disk to rehydrate from (a
+                    # crew armed and then never given a turn). ``ensure_crew_session``
+                    # creates the session and establishes trust the same way launch
+                    # does, without re-arming a loop that already exists.
+                    await ensure_crew_session(state, owner, repo, crew)
+                if not loop.active:
+                    await svc.update(loop.id, active=True)
+        # The pass itself awaits — the grant, the launch, the re-arm — so read once
+        # more and undo it if the operator stopped the crew while it ran.
+        # ``revoke_crew_execution`` is the exact inverse of what this body just
+        # established (the grant, the loop, the interactive flag), so this closes the
+        # window rather than narrowing it: no branch above can leave a stopped crew
+        # holding a grant or a live clock until the next cycle. The straight-line
+        # shape above, in place of the earlier ``continue``s, is what makes it total.
+        current = await _current_crew(owner, repo, crew, root)
+        if current is None or not is_live(current):
+            await revoke_crew_execution(state, current or crew, "stopped mid-cycle")
 
 
 def revoke_crew_grants(state: Any) -> int:
