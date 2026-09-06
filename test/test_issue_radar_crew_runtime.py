@@ -643,7 +643,7 @@ class TestSession(unittest.IsolatedAsyncioTestCase):
     async def test_session_key_agent_workspace_and_model_come_from_the_record(self):
         crew = _crew(self.root, agent="kirocrew", model="claude-opus-5")
         state = _FakeState()
-        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew)
+        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew, self.root)
         self.assertEqual(slot.key, f"crew-{crew['id']}")
         created = state.created[-1]
         self.assertEqual(created["name"], f"crew-{crew['id']}")
@@ -656,7 +656,7 @@ class TestSession(unittest.IsolatedAsyncioTestCase):
     async def test_title_is_locked_so_the_auto_titler_never_fires(self):
         crew = _crew(self.root)
         state = _FakeState()
-        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew)
+        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew, self.root)
         self.assertTrue(slot._titled)
         self.assertIn("Andromeda", slot.title)
         self.assertIn(f"{OWNER}/{REPO}", slot.title)
@@ -665,8 +665,8 @@ class TestSession(unittest.IsolatedAsyncioTestCase):
         state = _FakeState()
         unattended = _crew(self.root, name="Whirlpool", unattended=True)
         attended = _crew(self.root, name="Draco", unattended=False)
-        hot = await cr.ensure_crew_session(state, OWNER, REPO, unattended)
-        cold = await cr.ensure_crew_session(state, OWNER, REPO, attended)
+        hot = await cr.ensure_crew_session(state, OWNER, REPO, unattended, self.root)
+        cold = await cr.ensure_crew_session(state, OWNER, REPO, attended, self.root)
         self.assertTrue(_effectively_trusted(hot))
         self.assertFalse(_effectively_trusted(cold))
 
@@ -675,7 +675,7 @@ class TestSession(unittest.IsolatedAsyncioTestCase):
         that makes it so must be an expiring audited grant — not ``slot._trust``,
         which never expires and which only a human's click should ever set."""
         crew = _crew(self.root, unattended=True)
-        slot = await cr.ensure_crew_session(_FakeState(), OWNER, REPO, crew)
+        slot = await cr.ensure_crew_session(_FakeState(), OWNER, REPO, crew, self.root)
         self.assertTrue(_effectively_trusted(slot))
         self.assertFalse(slot._trust)  # the unbounded flag was NOT stamped
         scope = cr.autoapprove_scope(crew["id"])
@@ -690,7 +690,7 @@ class TestSession(unittest.IsolatedAsyncioTestCase):
         what makes it restart-durable."""
         crew = _crew(self.root, unattended=True)
         state = _FakeState()
-        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew)
+        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew, self.root)
         # As a gateway restart leaves it: slot rehydrated, grant gone.
         safety_override().deactivate_scope(cr.autoapprove_scope(crew["id"]))
         slot._trust_scope = ""
@@ -701,7 +701,7 @@ class TestSession(unittest.IsolatedAsyncioTestCase):
     async def test_trust_is_revoked_when_unattended_is_turned_off(self):
         crew = _crew(self.root, unattended=True)
         state = _FakeState()
-        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew)
+        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew, self.root)
         self.assertTrue(_effectively_trusted(slot))
         flipped = cs.update_crew(OWNER, REPO, crew["id"], {"unattended": False}, self.root)
         await cr.watchdog_cycle(state, OWNER, REPO, [flipped], self.root)
@@ -714,7 +714,7 @@ class TestSession(unittest.IsolatedAsyncioTestCase):
         """What the finding was actually about: with nothing renewing it, the grant
         RUNS OUT. Driven by making the scope inactive, never by sleeping."""
         crew = _crew(self.root, unattended=True)
-        slot = await cr.ensure_crew_session(_FakeState(), OWNER, REPO, crew)
+        slot = await cr.ensure_crew_session(_FakeState(), OWNER, REPO, crew, self.root)
         self.assertTrue(_effectively_trusted(slot))
         # The slot still names the scope — the record still says unattended — and
         # that must not be enough on its own.
@@ -732,7 +732,7 @@ class TestSession(unittest.IsolatedAsyncioTestCase):
         with mock.patch(
             "kiro_crew.safety_override.sel", side_effect=OSError("SEL unavailable")
         ):
-            slot = await cr.ensure_crew_session(_FakeState(), OWNER, REPO, crew)
+            slot = await cr.ensure_crew_session(_FakeState(), OWNER, REPO, crew, self.root)
         self.assertFalse(_effectively_trusted(slot))
         self.assertEqual(slot._trust_scope, "")
         self.assertFalse(slot._trust)  # and no fallback onto the unbounded flag
@@ -741,7 +741,7 @@ class TestSession(unittest.IsolatedAsyncioTestCase):
     async def test_watchdog_revokes_trust_for_a_paused_or_retired_crew(self):
         crew = _crew(self.root, unattended=True)
         state = _FakeState()
-        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew)
+        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew, self.root)
         paused = cs.update_crew(
             OWNER, REPO, crew["id"], {"paused_reason": "operator paused"}, self.root
         )
@@ -763,7 +763,7 @@ class TestSession(unittest.IsolatedAsyncioTestCase):
     async def test_wake_runs_a_turn_carrying_the_brief_and_the_nudge(self):
         crew = _crew(self.root, unattended=True)
         state = _FakeState()
-        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew)
+        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew, self.root)
         _item(self.root, crew["id"], 2201, phase="awaiting-ci", next="round 3")
         runner = mock.Mock()
         # ``_run_chat`` is bound at this module's scope, so it is patched by name
@@ -790,7 +790,7 @@ class TestSession(unittest.IsolatedAsyncioTestCase):
         reconciliation both still cover the signal."""
         crew = _crew(self.root, unattended=True)
         state = _FakeState()
-        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew)
+        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew, self.root)
         slot.running = True
         with mock.patch.object(cr, "_run_chat", mock.Mock()):
             started = await cr.wake_crew(state, OWNER, REPO, crew, "ci-changed", self.root)
@@ -804,6 +804,195 @@ class TestSession(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(
                 await cr.wake_crew(state, OWNER, REPO, crew, "signal", self.root)
             )
+
+    # ── the pause-during-wake race (fresh read at the grant chokepoint) ─────
+
+    async def test_wake_honors_a_pause_that_landed_after_the_snapshot_was_read(self):
+        """The TOCTOU this closes: the sweep reads the crew list, an operator
+        pauses the crew, then the wake runs with the pre-pause snapshot. The
+        stale dict says live, the store says paused — the store must win: no
+        grant is minted, no turn is dispatched, and a grant already held is
+        revoked rather than left to run out ``TRUST_TTL_SECS`` later."""
+        crew = _crew(self.root, unattended=True)
+        state = _FakeState()
+        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew, self.root)
+        self.assertTrue(_effectively_trusted(slot))
+        cs.set_crew_paused(OWNER, REPO, crew["id"], True, "operator paused", self.root)
+        with mock.patch.object(cr, "_run_chat", mock.Mock()):
+            started = await cr.wake_crew(state, OWNER, REPO, crew, "ci-changed", self.root)
+        self.assertFalse(started)
+        self.assertEqual(slot.prompts, [])
+        self.assertFalse(_effectively_trusted(slot))
+        self.assertFalse(safety_override().is_scope_active(cr.autoapprove_scope(crew["id"])))
+
+    async def test_wake_honors_a_pause_persisted_during_the_rehydrate_gap(self):
+        """The gap the issue names: ``wake_crew`` awaits ``_rehydrate`` before it
+        grants, so a pause that persists inside that await is invisible to the
+        in-memory snapshot. Driven by pausing FROM the rehydrate itself — the
+        latest point a concurrent pause can land — and asserting the wake then
+        does nothing auto-approved."""
+        crew = _crew(self.root, unattended=True)
+        state = _FakeState()  # no resident slot: the wake must rehydrate
+        slot = _FakeSlot(f"crew-{crew['id']}")
+
+        async def _pause_then_return_slot(_state: Any, _slot_key: str) -> Any:
+            cs.set_crew_paused(OWNER, REPO, crew["id"], True, "operator paused", self.root)
+            return slot
+
+        with mock.patch.object(cr, "_rehydrate", _pause_then_return_slot), mock.patch.object(
+            cr, "_run_chat", mock.Mock()
+        ):
+            started = await cr.wake_crew(state, OWNER, REPO, crew, "ci-changed", self.root)
+        self.assertFalse(started)
+        self.assertEqual(slot.prompts, [])
+        self.assertFalse(_effectively_trusted(slot))
+        self.assertFalse(safety_override().is_scope_active(cr.autoapprove_scope(crew["id"])))
+
+    async def test_wake_of_an_unpaused_crew_still_grants_and_dispatches(self):
+        """The companion boundary: the fresh read must not change the healthy
+        path. A live unattended crew woken with a current record still gets its
+        grant and its turn."""
+        crew = _crew(self.root, unattended=True)
+        state = _FakeState()
+        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew, self.root)
+        with mock.patch.object(cr, "_run_chat", mock.Mock()):
+            started = await cr.wake_crew(state, OWNER, REPO, crew, "ci-changed", self.root)
+        self.assertTrue(started)
+        self.assertEqual(len(slot.prompts), 1)
+        self.assertTrue(_effectively_trusted(slot))
+
+    async def test_sync_trust_re_reads_the_record_when_told_where_it_lives(self):
+        """The chokepoint itself, independent of ``wake_crew``: handed a stale
+        live snapshot plus the store location, ``sync_trust`` re-reads the record
+        in the same synchronous block as the grant and refuses. Every caller
+        that follows an ``await`` passes the location, so this covers them all."""
+        crew = _crew(self.root, unattended=True)
+        cs.set_crew_paused(OWNER, REPO, crew["id"], True, "operator paused", self.root)
+        slot = _FakeSlot(f"crew-{crew['id']}")
+        self.assertFalse(cr.sync_trust(slot, crew, owner=OWNER, repo=REPO, root=self.root))
+        self.assertFalse(_effectively_trusted(slot))
+        self.assertFalse(safety_override().is_scope_active(cr.autoapprove_scope(crew["id"])))
+
+    async def test_sync_trust_fails_closed_when_the_record_cannot_be_re_read(self):
+        """A grant must never outlive the record that authorizes it: a location
+        where the record does not exist yields no grant, never a fallback onto
+        the snapshot in hand."""
+        crew = {"id": "c_00000000", "unattended": True, "enabled": True}
+        slot = _FakeSlot("crew-c_00000000")
+        self.assertFalse(cr.sync_trust(slot, crew, owner=OWNER, repo=REPO, root=self.root))
+        self.assertFalse(_effectively_trusted(slot))
+
+    def test_every_sync_trust_call_site_passes_the_store_location(self):
+        """The grant chokepoint denies a location-less call, and this pin keeps
+        the production module from growing one: every ``sync_trust`` call in
+        ``crew_runtime`` — threaded or not — must carry ``owner``/``repo``/
+        ``root``, walked by AST so no call spelling escapes the check."""
+        tree = ast.parse(inspect.getsource(cr))
+        calls: list[ast.Call] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                name = (
+                    func.id
+                    if isinstance(func, ast.Name)
+                    else func.attr if isinstance(func, ast.Attribute) else ""
+                )
+                if name == "sync_trust":
+                    calls.append(node)
+                elif name == "to_thread" and node.args:
+                    first = node.args[0]
+                    if isinstance(first, ast.Name) and first.id == "sync_trust":
+                        calls.append(node)
+        self.assertTrue(calls, "no sync_trust call sites found")
+        for call in calls:
+            kwargs = {kw.arg for kw in call.keywords}
+            for required in ("owner", "repo", "root"):
+                self.assertIn(
+                    required,
+                    kwargs,
+                    f"sync_trust call at line {call.lineno} omits {required}=",
+                )
+
+    async def test_sync_trust_without_a_location_denies_even_a_live_crew(self):
+        """Deny-by-default: the re-read is the authorization check, so a caller
+        that cannot name where the crew lives gets no grant — never a fallback
+        onto the snapshot, which is the fail-open shape the AUTOSDE
+        backend-security-controls rule forbids."""
+        crew = _crew(self.root, unattended=True)
+        slot = _FakeSlot(f"crew-{crew['id']}")
+        self.assertFalse(cr.sync_trust(slot, crew))
+        self.assertFalse(_effectively_trusted(slot))
+        self.assertFalse(safety_override().is_scope_active(cr.autoapprove_scope(crew["id"])))
+
+    async def test_sync_trust_serializes_with_the_store_record_lock(self):
+        """The read and the mint hold the SAME lock every record write holds, so
+        a pause can never land between them: it either precedes the read (seen)
+        or follows the mint — and the pause route revokes after its write, which
+        kills that grant. Pinned by holding the records lock and proving the
+        grant path waits for it."""
+        crew = _crew(self.root, unattended=True)
+        slot = _FakeSlot(f"crew-{crew['id']}")
+        lock_path = cs._records_lock_path(OWNER, REPO, self.root)
+        result: list[bool] = []
+        with open(lock_path, "w") as fd:
+            self.assertTrue(platform_compat.try_acquire_lock(fd.fileno(), exclusive=True))
+            try:
+                worker = threading.Thread(
+                    target=lambda: result.append(
+                        cr.sync_trust(slot, crew, owner=OWNER, repo=REPO, root=self.root)
+                    )
+                )
+                worker.start()
+                # While this test holds the store's write lock, the grant path
+                # must not complete — that wait IS the serialization.
+                worker.join(timeout=0.5)
+                self.assertTrue(worker.is_alive(), "sync_trust did not wait for the lock")
+                self.assertEqual(result, [])
+            finally:
+                platform_compat.release_lock(fd.fileno())
+        worker.join(timeout=10)
+        self.assertFalse(worker.is_alive(), "sync_trust never completed after release")
+        self.assertEqual(result, [True])
+        self.assertTrue(_effectively_trusted(slot))
+
+    async def test_a_pause_landing_during_prompt_composition_stops_the_dispatch(self):
+        """The last awaits before dispatch are prompt composition and the loop
+        refresh; a pause persisted inside them must stop the turn — the final
+        admission re-check, with nothing suspending between it and dispatch."""
+        crew = _crew(self.root, unattended=True)
+        state = _FakeState()
+        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew, self.root)
+        real_compose = cr.compose_turn_prompt_async
+
+        async def _pause_then_compose(*args: Any, **kw: Any) -> str:
+            cs.set_crew_paused(OWNER, REPO, crew["id"], True, "operator paused", self.root)
+            return await real_compose(*args, **kw)
+
+        with mock.patch.object(
+            cr, "compose_turn_prompt_async", _pause_then_compose
+        ), mock.patch.object(cr, "_run_chat", mock.Mock()):
+            started = await cr.wake_crew(state, OWNER, REPO, crew, "ci-changed", self.root)
+        self.assertFalse(started)
+        self.assertEqual(slot.prompts, [])
+        self.assertFalse(_effectively_trusted(slot))
+
+    async def test_watchdog_does_not_rearm_a_crew_paused_after_the_sweeps_read(self):
+        """The re-arm branches (launch a missing loop, reactivate an inactive
+        one) act on the sweep's stale list; a pause persisted after that read
+        must stop them — a revived loop gets a fresh countdown and outlives the
+        pause until the next cycle."""
+        crew = _crew(self.root, unattended=True)
+        cs.set_crew_paused(OWNER, REPO, crew["id"], True, "operator paused", self.root)
+        state = _FakeState()
+        svc = _FakeNudge()  # no loop for this crew: the missing-loop branch
+        with mock.patch.object(cr, "_autonudge_instance", lambda: svc), mock.patch.object(
+            cr, "launch_crew", new=mock.AsyncMock()
+        ) as launch:
+            # The stale pre-pause snapshot still says live.
+            await cr.watchdog_cycle(state, OWNER, REPO, [crew], self.root)
+        launch.assert_not_awaited()
+        self.assertEqual(svc.added, [])
+        self.assertFalse(safety_override().is_scope_active(cr.autoapprove_scope(crew["id"])))
 
     # ── the snapshot never runs on the event loop ──────────────────────────
 
@@ -843,7 +1032,7 @@ class TestSession(unittest.IsolatedAsyncioTestCase):
     async def test_wake_composes_the_prompt_off_the_event_loop(self):
         crew = _crew(self.root, unattended=True)
         state = _FakeState()
-        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew)
+        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew, self.root)
         _item(self.root, crew["id"], 2201, phase="awaiting-ci", next="round 3")
         loop_thread = threading.get_ident()
         with self._snapshot_threads() as seen:
@@ -860,7 +1049,7 @@ class TestSession(unittest.IsolatedAsyncioTestCase):
         documents."""
         crew = _crew(self.root, unattended=True)
         state = _FakeState()
-        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew)
+        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew, self.root)
         loop_thread = threading.get_ident()
         seen: list[int] = []
         real = cr.brief_is_present
@@ -978,7 +1167,7 @@ class TestRevocation(unittest.IsolatedAsyncioTestCase):
         """A crew that is genuinely running: trusted slot, active loop."""
         crew = _crew(self.root, unattended=True, **spec)
         state = _FakeState()
-        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew)
+        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew, self.root)
         # the grant this revocation has to remove
         self.assertTrue(_effectively_trusted(slot))
         return crew, state, slot, _FakeNudge([_FakeLoop("nl_0", slot.key, active=True)])
@@ -1066,7 +1255,7 @@ class TestTurnDispatch(unittest.IsolatedAsyncioTestCase):
     async def test_a_wake_hands_the_slot_the_capped_runner(self):
         crew = _crew(self.root, unattended=True)
         state = _FakeState()
-        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew)
+        slot = await cr.ensure_crew_session(state, OWNER, REPO, crew, self.root)
         started = await cr.wake_crew(state, OWNER, REPO, crew, "ci-changed", self.root)
         self.assertTrue(started)
         self.assertEqual(slot.runners, [cr._capped_run_chat])
@@ -1793,21 +1982,26 @@ class TestWatchGating(unittest.IsolatedAsyncioTestCase):
     async def test_suspension_clears_trust_on_resident_crew_slots(self):
         reset_singleton()
         self.addCleanup(reset_singleton)
-        state = _FakeState()
-        slot = _FakeSlot("crew-c_abc")
-        slot._app = "issue-radar"
-        cr.sync_trust(slot, {"id": "c_abc", "unattended": True, "enabled": True})
-        self.assertTrue(_effectively_trusted(slot))
-        other = _FakeSlot("chat-1")
-        other._app = ""
-        other._trust = True
-        state._slots = {"crew-c_abc": slot, "chat-1": other}
-        cleared = await cr.suspend_crews(state)
-        self.assertEqual(cleared, 1)
-        self.assertFalse(_effectively_trusted(slot))
-        # Revoked at the source too, so re-attaching a slot cannot inherit it.
-        self.assertFalse(safety_override().is_scope_active(cr.autoapprove_scope("c_abc")))
-        self.assertTrue(other._trust)  # a user's own session is not ours to touch
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            crew = _crew(root, name="Suspend", unattended=True)
+            state = _FakeState()
+            slot = _FakeSlot(str(crew["slot_key"]))
+            slot._app = "issue-radar"
+            cr.sync_trust(slot, crew, owner=OWNER, repo=REPO, root=root)
+            self.assertTrue(_effectively_trusted(slot))
+            other = _FakeSlot("chat-1")
+            other._app = ""
+            other._trust = True
+            state._slots = {slot.key: slot, "chat-1": other}
+            cleared = await cr.suspend_crews(state)
+            self.assertEqual(cleared, 1)
+            self.assertFalse(_effectively_trusted(slot))
+            # Revoked at the source too, so re-attaching a slot cannot inherit it.
+            self.assertFalse(
+                safety_override().is_scope_active(cr.autoapprove_scope(crew["id"]))
+            )
+            self.assertTrue(other._trust)  # a user's own session is not ours to touch
 
 
 class TestDisablingTheAppRevokesInline(unittest.IsolatedAsyncioTestCase):
@@ -1831,10 +2025,18 @@ class TestDisablingTheAppRevokesInline(unittest.IsolatedAsyncioTestCase):
         # ``watchdog_cycle`` re-registers the dismissal hook, which is process-wide
         # state; drop it again so these tests cannot change another's outcome.
         self.addCleanup(teardown.unregister_slot_close_hook, cr.APP_NAME)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
         self.state = _FakeState()
-        self.slot = _FakeSlot("crew-c_d15ab1ed")
+        # A REAL record: ``sync_trust`` and ``watchdog_cycle`` both re-read the
+        # store before granting or re-arming, so a crew that exists only as an
+        # in-memory dict is (correctly) refused — the phantom-crew failure mode
+        # this app already guards.
+        self.crew = _crew(self.root, name="Disable", unattended=True)
+        self.slot = _FakeSlot(str(self.crew["slot_key"]))
         self.slot._app = cr.APP_NAME
-        cr.sync_trust(self.slot, {"id": "c_d15ab1ed", "unattended": True, "enabled": True})
+        cr.sync_trust(self.slot, self.crew, owner=OWNER, repo=REPO, root=self.root)
         self.assertTrue(_effectively_trusted(self.slot), "fixture never got its grant")
         # Both registries: ``get_slot`` reads the public one, the suspension walks
         # the private one it can enumerate.
@@ -1878,7 +2080,9 @@ class TestDisablingTheAppRevokesInline(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cleared, 1)
         self.assertFalse(_effectively_trusted(self.slot))
         # Revoked at the source too, so re-attaching a slot cannot inherit it.
-        self.assertFalse(safety_override().is_scope_active(cr.autoapprove_scope("c_dis")))
+        self.assertFalse(
+            safety_override().is_scope_active(cr.autoapprove_scope(self.crew["id"]))
+        )
         # And the crew's clock is stopped, so no later turn is even scheduled.
         self.assertEqual(self.nudge.updates, [("nl_dis", {"active": False})])
         poll.assert_not_awaited()
@@ -1948,9 +2152,9 @@ class TestDisablingTheAppRevokesInline(unittest.IsolatedAsyncioTestCase):
             await hook(cr.APP_NAME)
         self.assertFalse(_effectively_trusted(self.slot))
 
-        crew = {"id": "c_d15ab1ed", "unattended": True, "enabled": True, "slot_key": self.slot.key}
+        crew = self.crew
         with mock.patch.object(cr, "_autonudge_instance", return_value=self.nudge):
-            await cr.watchdog_cycle(self.state, OWNER, REPO, [crew])
+            await cr.watchdog_cycle(self.state, OWNER, REPO, [crew], self.root)
         self.assertTrue(_effectively_trusted(self.slot))
         self.assertIn(("nl_dis", {"active": True}), self.nudge.updates)
 
@@ -2010,8 +2214,16 @@ class TestGrantRenewal(unittest.TestCase):
     def setUp(self):
         reset_singleton()
         self.addCleanup(reset_singleton)
-        self.crew = {"id": "c_r", "unattended": True, "enabled": True}
-        self.slot = _FakeSlot("crew-c_r")
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        # A real record: the grant path re-reads the store before minting, so
+        # renewal semantics can only be observed against a crew that exists.
+        self.crew = _crew(self.root, name="Renewal", unattended=True)
+        self.slot = _FakeSlot(str(self.crew["slot_key"]))
+
+    def _sync(self) -> bool:
+        return cr.sync_trust(self.slot, self.crew, owner=OWNER, repo=REPO, root=self.root)
 
     def test_repeated_cycles_activate_once_and_slide_thereafter(self):
         so = safety_override()
@@ -2021,26 +2233,26 @@ class TestGrantRenewal(unittest.TestCase):
             type(so), "renew_scoped", wraps=so.renew_scoped
         ) as renew:
             for _ in range(5):
-                self.assertTrue(cr.sync_trust(self.slot, self.crew))
+                self.assertTrue(self._sync())
         self.assertEqual(activate.call_count, 1, "re-minted the grant on a live scope")
         self.assertEqual(renew.call_count, 4)
 
     def test_a_slide_carries_the_crew_ttl_and_not_the_six_hour_default(self):
         """``renew_scoped``'s default TTL is the 6h ad-hoc one. Letting it default
         would silently widen the grant to 6h on the very first watchdog cycle."""
-        cr.sync_trust(self.slot, self.crew)
+        self._sync()
         so = safety_override()
         with mock.patch.object(type(so), "renew_scoped", wraps=so.renew_scoped) as renew:
-            cr.sync_trust(self.slot, self.crew)
+            self._sync()
         self.assertEqual(renew.call_args.kwargs.get("ttl"), cr.TRUST_TTL_SECS)
         self.assertLessEqual(
-            so.scope_remaining_secs(cr.autoapprove_scope("c_r")), cr.TRUST_TTL_SECS
+            so.scope_remaining_secs(cr.autoapprove_scope(self.crew["id"])), cr.TRUST_TTL_SECS
         )
 
     def test_a_grant_at_its_ceiling_is_reminted_rather_than_left_to_lapse(self):
         """At the 24h ceiling the slide is refused. Minting a fresh grant re-audits
         the decision AND keeps a mid-turn crew from losing trust in the gap."""
-        cr.sync_trust(self.slot, self.crew)
+        self._sync()
         so = safety_override()
         refused = type(so).renew_scoped(so, "nope", source="x")  # renewed=False shape
         self.assertFalse(refused.renewed)
@@ -2049,7 +2261,7 @@ class TestGrantRenewal(unittest.TestCase):
         ), mock.patch.object(
             type(so), "activate_scoped", wraps=so.activate_scoped
         ) as activate:
-            self.assertTrue(cr.sync_trust(self.slot, self.crew))
+            self.assertTrue(self._sync())
         activate.assert_called_once()
 
 
@@ -2242,17 +2454,20 @@ class TestSelRootIsolation(unittest.IsolatedAsyncioTestCase):
             else:
                 self.fail("could not stage the foreign holder on the shared root")
             try:
-                slot = _FakeSlot("crew-c_7029iso")
-                slot._app = cr.APP_NAME
-                granted = cr.sync_trust(
-                    slot, {"id": "c_7029iso", "unattended": True, "enabled": True}
-                )
-                self.assertTrue(
-                    granted,
-                    "trust was refused: the audit contended for the SHARED root's "
-                    "chain lock, so this test's SEL root is not private (#7029)",
-                )
-                self.assertTrue(_effectively_trusted(slot))
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    crew = _crew(root, name="SelIso", unattended=True)
+                    slot = _FakeSlot(str(crew["slot_key"]))
+                    slot._app = cr.APP_NAME
+                    granted = cr.sync_trust(
+                        slot, crew, owner=OWNER, repo=REPO, root=root
+                    )
+                    self.assertTrue(
+                        granted,
+                        "trust was refused: the audit contended for the SHARED root's "
+                        "chain lock, so this test's SEL root is not private (#7029)",
+                    )
+                    self.assertTrue(_effectively_trusted(slot))
             finally:
                 platform_compat.release_lock(fd)
         finally:

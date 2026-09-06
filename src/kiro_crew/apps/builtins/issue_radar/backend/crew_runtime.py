@@ -46,6 +46,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from kiro_crew import platform_compat
 from kiro_crew.apps import teardown
 from kiro_crew.apps.teardown import register_slot_close_hook, register_slot_close_undo_hook
 from kiro_crew.atomic_write import atomic_write
@@ -514,7 +515,34 @@ def _hold_grant(scope: str) -> bool:
     return bool(so.activate_scoped(scope, source=GRANT_SOURCE, ttl=TRUST_TTL_SECS).active)
 
 
-def sync_trust(slot: Any, crew: dict[str, Any]) -> bool:
+def _fresh_crew_record(
+    crew: dict[str, Any], owner: str, repo: str, root: Path | None
+) -> dict[str, Any] | None:
+    """Re-read this crew's record from its store. Blocking — call in a thread.
+
+    ``None`` means the record could not be read: no id on the snapshot, the file
+    is gone, or the read failed. Callers MUST treat that as not live — a grant
+    must never outlive the record that authorizes it, so an unreadable record
+    fails closed rather than falling back to the snapshot in hand.
+    """
+    crew_id = str(crew.get("id") or "")
+    if not crew_id:
+        return None
+    try:
+        return crew_store.read_crew(owner, repo, crew_id, root)
+    except Exception:  # pragma: no cover - defensive: a store error must fail closed
+        logger.debug("issue-radar: fresh crew read failed for %s", crew_id, exc_info=True)
+        return None
+
+
+def sync_trust(
+    slot: Any,
+    crew: dict[str, Any],
+    *,
+    owner: str = "",
+    repo: str = "",
+    root: Path | None = None,
+) -> bool:
     """Hold the crew's auto-approve grant in step with its record. Returns trust.
 
     Called at launch AND from the watchdog every cycle, and it is an ASSIGNMENT,
@@ -522,6 +550,28 @@ def sync_trust(slot: Any, crew: dict[str, Any]) -> bool:
     stops being live, loses the grant within one cycle. Liveness is re-checked here
     and not only by the caller, so this function cannot hand a grant to a paused
     crew whatever path reaches it.
+
+    THE RE-READ THAT CLOSES THE PAUSE RACE: every caller sits at least one
+    ``await`` away from wherever its ``crew`` snapshot was read, and a pause
+    persisted in that gap never mutates the snapshot — so trusting the snapshot
+    would mint a grant for a crew the operator just stopped, recoverable only by
+    the next watchdog cycle inside ``TRUST_TTL_SECS``. So the snapshot is never
+    trusted for a grant: the record is re-read from the store, and a caller that
+    does not name where the crew lives (``owner``/``repo``) is DENIED, not served
+    from the snapshot — deny-by-default, so the secure outcome needs no opt-in. A
+    record that cannot be re-read fails closed to "not live" the same way.
+
+    THE READ AND THE MINT SHARE THE STORE'S OWN WRITE LOCK. Pause, retire and
+    every other record write go through ``crew_store.update_crew``, which holds
+    the repo-wide records lock — so this function takes the same lock across
+    read-record → decide → mint. That gives an ordering guarantee no bare re-read
+    can: a pause writing concurrently either lands BEFORE the read (seen: no
+    grant) or AFTER the mint — and the pause route revokes execution after its
+    write returns, which deactivates that grant. A grant can therefore never
+    outlive a durable pause, however the threads interleave. The lock is the
+    innermost of the store's total order (crew → skip → records) and this
+    function holds no other, so no new deadlock shape is introduced. Blocking —
+    every production caller runs it via ``asyncio.to_thread``.
 
     ``slot._trust_scope`` carries the scope key onto the slot, because the consumer
     of the grant is the shared dashboard approval path — a grant nothing consults
@@ -537,13 +587,66 @@ def sync_trust(slot: Any, crew: dict[str, Any]) -> bool:
     is no grant at all and the crew falls back to the ordinary approval path.
     """
     scope = autoapprove_scope(str(crew.get("id") or ""))
-    want = bool(crew.get("unattended")) and is_live(crew)
+    if not (owner and repo):
+        # No location means no re-read, and an unverifiable record must not
+        # grant: deny-by-default. Revocation is still performed, so the bare
+        # form remains a safe way to take trust away.
+        if bool(crew.get("unattended")) and is_live(crew):
+            logger.warning(
+                "issue-radar crew %s: trust refused — sync_trust was called without "
+                "the crew's store location, so its record cannot be re-read at "
+                "grant time",
+                crew.get("id"),
+            )
+        return _apply_trust(slot, scope, str(crew.get("id") or ""), want=False)
+    try:
+        lock_path = crew_store._records_lock_path(owner, repo, root)
+        with open(lock_path, "w") as lock_fd:
+            with platform_compat.file_lock(lock_fd.fileno(), exclusive=True):
+                fresh = _fresh_crew_record(crew, owner, repo, root)
+                if fresh is None:
+                    if is_live(crew):
+                        logger.warning(
+                            "issue-radar crew %s: record could not be re-read at "
+                            "grant time; failing closed — no auto-approve grant",
+                            crew.get("id"),
+                        )
+                    want = False
+                else:
+                    if is_live(crew) and not is_live(fresh):
+                        logger.info(
+                            "issue-radar crew %s: grant skipped — %s landed while "
+                            "the wake was in flight",
+                            crew.get("id"),
+                            (
+                                f"a pause ({fresh.get('paused_reason')})"
+                                if fresh.get("paused_reason")
+                                else "retirement" if fresh.get("retired_at") else "a disable"
+                            ),
+                        )
+                    want = bool(fresh.get("unattended")) and is_live(fresh)
+                return _apply_trust(slot, scope, str(crew.get("id") or ""), want=want)
+    except OSError:
+        # The lock could not even be taken (store root gone, permissions). The
+        # record is unverifiable, so the grant fails closed like any other
+        # unreadable-record case.
+        logger.warning(
+            "issue-radar crew %s: store lock unavailable at grant time; failing "
+            "closed — no auto-approve grant",
+            crew.get("id"),
+            exc_info=True,
+        )
+        return _apply_trust(slot, scope, str(crew.get("id") or ""), want=False)
+
+
+def _apply_trust(slot: Any, scope: str, crew_id: str, *, want: bool) -> bool:
+    """Make the grant match ``want`` and mirror it onto the slot. Returns trust."""
     had = bool(getattr(slot, "_trust_scope", ""))
     if not want:
         safety_override().deactivate_scope(scope)
         slot._trust_scope = ""
         if had:
-            logger.info("issue-radar crew %s: trust revoked", crew.get("id"))
+            logger.info("issue-radar crew %s: trust revoked", crew_id)
         return False
     granted = _hold_grant(scope)
     slot._trust_scope = scope if granted else ""
@@ -555,10 +658,10 @@ def sync_trust(slot: Any, crew: dict[str, Any]) -> bool:
         logger.error(
             "issue-radar crew %s: auto-approve grant REFUSED (its audit could not "
             "be written); the crew will fall back to interactive approval",
-            crew.get("id"),
+            crew_id,
         )
     elif not had:
-        logger.info("issue-radar crew %s: trust established", crew.get("id"))
+        logger.info("issue-radar crew %s: trust established", crew_id)
     return granted
 
 
@@ -629,13 +732,19 @@ async def revoke_crew_execution(state: Any, crew: dict[str, Any], reason: str = 
     return revoked
 
 
-async def ensure_crew_session(state: Any, owner: str, repo: str, crew: dict[str, Any]) -> Any:
+async def ensure_crew_session(
+    state: Any, owner: str, repo: str, crew: dict[str, Any], root: Path | None = None
+) -> Any:
     """Attach to (or create) the crew's app-owned slot and return it.
 
     Agent, workspace and model all come from the crew record. ``model`` OVERRIDES
     whatever the chosen agent pins, because ``get_or_create_slot`` takes it as an
     explicit argument — that is the intended precedence: the crew's config is the
     operator's last word.
+
+    ``root`` names the store the crew lives under so :func:`sync_trust` can
+    re-read the record at grant time; the awaits above that call are exactly the
+    gap a concurrent pause lands in.
     """
     slot_key = str(crew.get("slot_key") or f"crew-{crew.get('id')}")
     slot = state.get_or_create_slot(
@@ -663,7 +772,7 @@ async def ensure_crew_session(state: Any, owner: str, repo: str, crew: dict[str,
                     exc_info=True,
                 )
         _call_if_present(state, "push_slot_title", slot.key, title)
-    await asyncio.to_thread(sync_trust, slot, crew)
+    await asyncio.to_thread(sync_trust, slot, crew, owner=owner, repo=repo, root=root)
     _call_if_present(state, "push_slots_update")
     return slot
 
@@ -682,7 +791,7 @@ async def launch_crew(
     ``enabled``/``retired_at`` flags, the STOP sentinel, and the app's own enabled
     gate, all of which the watchdog re-reads every cycle.
     """
-    slot = await ensure_crew_session(state, owner, repo, crew)
+    slot = await ensure_crew_session(state, owner, repo, crew, root)
     svc = _autonudge_instance() if _autonudge_instance is not None else None
     if svc is None:
         logger.warning(
@@ -776,6 +885,9 @@ async def wake_crew(
     at launch; and the prompt is dispatched immediately, because the whole point of
     the sweep is that the crew does not wait out an idle gap after CI turns red.
     ``enqueue_or_run_prompt`` queues instead of racing when the crew is mid-turn.
+    Both are gated on a FRESH read of the crew record: a pause persisted after the
+    caller's snapshot was taken means no grant and no turn, not one last
+    auto-approved turn recovered only by the next watchdog cycle.
     """
     slot = state.get_slot(str(crew.get("slot_key") or f"crew-{crew.get('id')}"))
     if slot is None:
@@ -785,7 +897,33 @@ async def wake_crew(
             "issue-radar crew %s: no session to wake (%s)", crew.get("id"), reason or "signal"
         )
         return False
-    await asyncio.to_thread(sync_trust, slot, crew)
+    # HONOR A PAUSE THAT LANDED WHILE THIS WAKE WAS IN FLIGHT. The ``crew``
+    # snapshot was read before at least one await (the sweep's, and the
+    # rehydrate above), and a pause/retire/disable persisted in that gap never
+    # mutates it — so the snapshot alone would dispatch one more turn on a crew
+    # the operator just stopped. Re-read the record and skip the turn instead;
+    # ``sync_trust`` still runs so a grant already held is revoked rather than
+    # left to expire. A record that cannot be re-read is treated as not live.
+    fresh = await asyncio.to_thread(_fresh_crew_record, crew, owner, repo, root)
+    if fresh is None or not is_live(fresh):
+        await asyncio.to_thread(sync_trust, slot, crew, owner=owner, repo=repo, root=root)
+        logger.info(
+            "issue-radar crew %s: wake skipped (%s) — crew is %s",
+            crew.get("id"),
+            reason or "signal",
+            (
+                "gone from the store"
+                if fresh is None
+                else (
+                    f"paused: {fresh.get('paused_reason')}"
+                    if fresh.get("paused_reason")
+                    else "retired" if fresh.get("retired_at") else "disabled"
+                )
+            ),
+        )
+        return False
+    crew = fresh
+    await asyncio.to_thread(sync_trust, slot, crew, owner=owner, repo=repo, root=root)
     prompt = await compose_turn_prompt_async(slot, owner, repo, crew, root, key)
     svc = _autonudge_instance() if _autonudge_instance is not None else None
     if svc is not None:
@@ -810,6 +948,21 @@ async def wake_crew(
         )
         return False
     tagged = f"[crew wake: {reason}]\n{prompt}" if reason else prompt
+    # FINAL ADMISSION. Prompt composition and the loop refresh above are awaits,
+    # so a pause can have landed since the gate at the top of this function.
+    # Re-read one last time; nothing between this check and the dispatch below
+    # suspends, so a pause that beats it is honored and one that loses it is
+    # revoked inline by the pause route (and the watchdog backstop).
+    fresh = await asyncio.to_thread(_fresh_crew_record, crew, owner, repo, root)
+    if fresh is None or not is_live(fresh):
+        await asyncio.to_thread(sync_trust, slot, crew, owner=owner, repo=repo, root=root)
+        logger.info(
+            "issue-radar crew %s: wake abandoned at dispatch (%s) — the crew was "
+            "stopped while its prompt was being composed",
+            crew.get("id"),
+            reason or "signal",
+        )
+        return False
     started = dispatch_crew_turn(state, slot, tagged)
     _call_if_present(state, "push_slots_update")
     logger.info(
@@ -1087,7 +1240,16 @@ async def watchdog_cycle(
     for crew in crews:
         slot_key = str(crew.get("slot_key") or f"crew-{crew.get('id')}")
         slot = state.get_slot(slot_key) if hasattr(state, "get_slot") else None
-        if not is_live(crew):
+        # The ``crews`` list was read before this coroutine's awaits, so re-read
+        # each record before acting on it: the launch and re-arm branches below
+        # must not re-arm a loop for a crew whose pause landed after the sweep's
+        # read — a revived loop gets a fresh countdown and outlives the pause
+        # until the NEXT cycle notices. A record that cannot be re-read is
+        # treated as not live (fail closed), same as the grant path.
+        fresh = await asyncio.to_thread(_fresh_crew_record, crew, owner, repo, root)
+        if fresh is not None:
+            crew = fresh
+        if fresh is None or not is_live(crew):
             await revoke_crew_execution(state, crew, "not live")
             continue
         if slot is None:
@@ -1100,7 +1262,7 @@ async def watchdog_cycle(
             # first, so the crew keeps its own transcript (and its brief).
             slot = await _rehydrate(state, slot_key)
         if slot is not None:
-            await asyncio.to_thread(sync_trust, slot, crew)
+            await asyncio.to_thread(sync_trust, slot, crew, owner=owner, repo=repo, root=root)
         if svc is None:
             continue
         loop = svc.get_by_slot(slot_key)
@@ -1114,7 +1276,7 @@ async def watchdog_cycle(
             # armed and then never given a turn). ``ensure_crew_session`` creates
             # the session and establishes trust the same way launch does, without
             # re-arming a loop that already exists.
-            await ensure_crew_session(state, owner, repo, crew)
+            await ensure_crew_session(state, owner, repo, crew, root)
         if not loop.active:
             await svc.update(loop.id, active=True)
 
