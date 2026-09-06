@@ -90,6 +90,14 @@ Task: <first 100 chars of the task>
   instead of re-running the sub-agent.
 - A user-stopped agent says so explicitly and instructs the parent not to treat the
   partial output as a finished result or retry it unprompted.
+- A wide wave is delivered in chunks under a sibling prefix,
+  `SUBAGENT_BATCH_COMPLETION_PREFIX`, which `state.py` bundles with the others into
+  `SUBAGENT_COMPLETION_PREFIXES` for the same `str.startswith` classification. A
+  chunk is NOT the wave: a mid-wave chunk carries progress facts (how many of the
+  total are delivered, how many still running) and tells the parent to process
+  those results without spawning yet, because more chunks are still arriving. Only
+  the final chunk reports the wave finished, carries the run's tallies, and
+  releases the spawn-discipline gate.
 - The runner appends it with role `subagent`, so it renders as its own message kind
   rather than a user bubble.
 - Orchestration guards append to the same envelope when a stage has burned its
@@ -389,6 +397,22 @@ cannot reach.
 
 So there is no `[Widget action event]` envelope. What reaches the session is an
 ordinary user message beginning `[UI] `, sent by a human, carrying an origin tag.
+
+## Other injected envelopes
+
+These carry no `state.py` prefix constant, so they are classified by their own
+literal header rather than through `str.startswith` on a shared prefix. The
+system prompt names each one so the model reads it as data or as automation
+speech rather than as the user.
+
+| Envelope | Emitted by | What it means to the model |
+|---|---|---|
+| `[work ledger — …]` | `session_ledger.py` snapshot builder, composed into a nudge by `dashboard/handlers/autonudge.py` | Durable per-session state that outranks the model's recollection of earlier cycles. |
+| `[Hook context:]` … `[End of hook context]` | `context.py` hook-context assembly | Context supplied by a configured hook whose action is `HOOK_INJECT_CONTEXT`; webhook-restored workflow state is one producer, not the envelope's only meaning. The payload is untrusted third-party data. |
+| `[Previous run result — do NOT repeat the same content]` | `cron.py` | A recurring cron's own last output, so the turn reports only what changed. |
+| `[RESOURCES]` | `resource_status.py` advisory builder | Host memory crossed the tight/critical threshold; take the lighter path this turn. |
+| `[Relevant skills for this message]` | `skills.py` pointer renderer | Skill candidates named by path instead of by injected body. The body must be read before use unless that skill already appears earlier in the conversation, where native history still carries its instructions. |
+| `[INCOGNITO SESSION]` / `[TEMPORARY SESSION]` | `dashboard/chat_utils.py` ephemeral-session prefixes | An instruction, not a tool-level gate: it forbids memory tools (writes in incognito, reads as well in temporary) and keeps nothing of the chat, its history or its lessons. `learn_remove` and the cron tools stay permitted as active user actions, and a cron change persists outside the ephemeral transcript. |
 
 ## Adding a new envelope
 
