@@ -2830,12 +2830,13 @@ def build_refusal_recovery_prompt(
 #: The notice's INVARIANT half — that this was not a user action, the generic
 #: string it is correcting, and the instruction to decide inside this turn — is
 #: identical for every cause; only the clause naming the cause and the guidance
-#: about what to do next differ. Kept as data rather than three near-copies of
-#: the notice so the invariant half cannot drift between them, which is the half
-#: doing the actual work of overwriting the model's wrong conclusion.
+#: about what to do next differ. Kept as data rather than a near-copy of the
+#: notice per cause so the invariant half cannot drift between them, which is the
+#: half doing the actual work of overwriting the model's wrong conclusion.
 DENY_CAUSE_POLICY = "policy"
 DENY_CAUSE_INVALID_NAME = "invalid_name"
 DENY_CAUSE_HOOK_ERROR = "hook_error"
+DENY_CAUSE_BATCH_CASCADE = "batch_cascade"
 
 #: cause → (clause completing "The tool call you just made …", what to do next).
 _DENY_CAUSE_TEXT: dict[str, tuple[str, str]] = {
@@ -2856,6 +2857,14 @@ _DENY_CAUSE_TEXT: dict[str, tuple[str, str]] = {
         "treat this as a host fault, not a verdict on the action: nothing judged the "
         "call itself. Retrying the identical call is reasonable once; if it faults "
         "again, say what happened rather than working around it silently.",
+    ),
+    DENY_CAUSE_BATCH_CASCADE: (
+        "was auto-declined along with every remaining call in its batch, because "
+        "the host declined an earlier tool of the same batch",
+        "nothing judged these calls themselves — the group was cut short as a "
+        "whole. Address what declined that earlier tool (the reason above), then "
+        "re-issue the calls you still need; if you genuinely cannot proceed "
+        "without them, say so and stop with the reason.",
     ),
 }
 
@@ -2887,9 +2896,11 @@ def build_refusal_steer_notice(
 
     *cause* selects the wording. The distinction is not cosmetic: a policy block
     is a verdict the model must route around, an invalid tool name is the model's
-    own malformed output and is the one case it can simply fix, and a hook fault
-    judged nothing at all. Telling the model "safety policy" for the latter two
-    would send it looking for an allowed alternative to an action nobody refused.
+    own malformed output and is the one case it can simply fix, a hook fault
+    judged nothing at all, and a batch cascade cut the group short without
+    judging its members. Telling the model "safety policy" for any non-policy
+    cause would send it looking for an allowed alternative to an action nobody
+    refused.
     An unknown cause degrades to the policy wording rather than raising: a wrong
     noun is recoverable, and losing the notice would hand the model back
     kiro-cli's "user denied" with nothing to correct it.
@@ -2901,19 +2912,20 @@ def build_refusal_steer_notice(
         return ""
     clause, guidance = _DENY_CAUSE_TEXT.get(cause, _DENY_CAUSE_TEXT[DENY_CAUSE_POLICY])
     what = f"{title}: {reason}" if reason else title
-    # Class-specific remediation, for the policy cause only. The other two causes
-    # judged nothing about the action — an invalid tool name is the model's own
-    # malformed output and a hook fault is a host fault — so naming a sanctioned
-    # alternative there would answer a question nobody asked and imply the action
-    # itself had been refused.
+    # Class-specific remediation, for the policy cause only. The non-policy
+    # causes judged nothing about the action — an invalid tool name is the
+    # model's own malformed output, a hook fault is a host fault, and a cascaded
+    # batch member was never reached — so naming a sanctioned alternative there
+    # would answer a question nobody asked and imply the action itself had been
+    # refused.
     remediation = (
         remediation_for(reason, title, credential_tool_hint=credential_tool_hint)
         if cause == DENY_CAUSE_POLICY
         else ""
     )
     tail = f"\n\nHow to do this properly: {remediation}" if remediation else ""
-    # "host notice", not "policy notice": the tag has to be true for all three
-    # causes, and only one of them IS a policy. Naming the ACTOR is also what the
+    # "host notice", not "policy notice": the tag has to be true for every
+    # cause, and only one of them IS a policy. Naming the ACTOR is also what the
     # notice exists to do — the model has just been told the user denied this, and
     # every sentence after this one is spent correcting that.
     return (
@@ -3249,6 +3261,7 @@ class _ChatSlot:
         "_promise_only_stop_gen",
         "_compaction_continue_retries",
         "_batch_rejected",
+        "_batch_rejected_cause",
         "_compaction_failed_retries",
         "_compaction_fail_streak",
         "_compaction_fail_cooldown_until",
@@ -3708,6 +3721,15 @@ class _ChatSlot:
         # the other per-turn retry budgets on a landed turn.
         self._compaction_continue_retries: int = 0
         self._batch_rejected: bool = False
+        # WHO/WHAT set ``_batch_rejected``: empty for an interactive user
+        # decline, else a short host-authored sentence naming the auto-decline
+        # (approval timeout, no turn budget, Slack delivery failure). The
+        # cascade site reads it to decide attribution: a user's refusal makes
+        # kiro-cli's "User denied tool execution" TRUE for the cascaded
+        # remainder, while a host-caused decline makes it false and worth a
+        # cause-specific in-band correction. Same lifetime as the flag itself —
+        # set together, cleared together.
+        self._batch_rejected_cause: str = ""
         # Per-turn compaction-status failure tracking (Mesh compaction-spam
         # fix). Distinct from SessionManager._compact_cooldown_until, which
         # only gates the *proactive* session-level auto-compact trigger —

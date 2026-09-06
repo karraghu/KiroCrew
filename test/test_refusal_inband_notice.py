@@ -27,6 +27,7 @@ from kiro_crew.dashboard.chat_runner import (
     _steer_policy_notice,
 )
 from kiro_crew.dashboard.state import (
+    DENY_CAUSE_BATCH_CASCADE,
     DENY_CAUSE_HOOK_ERROR,
     DENY_CAUSE_INVALID_NAME,
     DENY_CAUSE_POLICY,
@@ -407,10 +408,35 @@ class TestCauseSpecificWording:
             "bash", "denied"
         )
 
+    def test_batch_cascade_names_the_group_and_defers_to_the_reason(self):
+        # The cascade's members were never individually judged, so the wording
+        # must neither claim a policy verdict nor scope itself to one call: the
+        # single notice stands in for every cascaded member of the batch.
+        out = build_refusal_steer_notice(
+            "list_files",
+            "the approval prompt for an earlier tool in this batch went unanswered "
+            "for 600s, so the host declined it",
+            cause=DENY_CAUSE_BATCH_CASCADE,
+        )
+        assert "every remaining call in its batch" in out
+        assert "nothing judged these calls themselves" in out
+        # The reason is where the ORIGINATING host cause lives; the clause must
+        # direct the model at it rather than restating one hardcoded cause.
+        assert "unanswered for 600s" in out
+        assert "safety policy" not in out
+        # Re-issuing is sanctioned once the original decline is addressed — the
+        # opposite of the policy guidance to find a different approach.
+        assert "re-issue" in out.lower()
+
     def test_every_cause_keeps_the_invariant_half(self):
         # The half that does the actual work -- naming the string being corrected
         # and forbidding a hand-back -- must not vary with the cause.
-        for cause in (DENY_CAUSE_POLICY, DENY_CAUSE_INVALID_NAME, DENY_CAUSE_HOOK_ERROR):
+        for cause in (
+            DENY_CAUSE_POLICY,
+            DENY_CAUSE_INVALID_NAME,
+            DENY_CAUSE_HOOK_ERROR,
+            DENY_CAUSE_BATCH_CASCADE,
+        ):
             out = build_refusal_steer_notice("bash", "why", cause=cause)
             assert "User denied tool execution" in out, cause
             assert "NOT a user action" in out, cause
@@ -418,10 +444,15 @@ class TestCauseSpecificWording:
             assert "do not ask the user" in out.lower(), cause
 
     def test_the_bracket_tag_is_cause_neutral(self):
-        # The tag has to be true for all three causes. Saying "policy notice" above
+        # The tag has to be true for every cause. Saying "policy notice" above
         # a sentence that explains the call was NOT a policy matter contradicts the
         # body one line later, and the body is the part doing the correcting.
-        for cause in (DENY_CAUSE_POLICY, DENY_CAUSE_INVALID_NAME, DENY_CAUSE_HOOK_ERROR):
+        for cause in (
+            DENY_CAUSE_POLICY,
+            DENY_CAUSE_INVALID_NAME,
+            DENY_CAUSE_HOOK_ERROR,
+            DENY_CAUSE_BATCH_CASCADE,
+        ):
             out = build_refusal_steer_notice("bash", "why", cause=cause)
             assert out.startswith("[Kiro Crew host notice]"), cause
             # "policy" may still appear in the POLICY cause's own clause; what must
@@ -659,3 +690,99 @@ class TestEveryHostDenyCallSiteIsWired:
             f"{calls - wired} deny call(s) in the interactive approved branch do not "
             "steer -- the user approved, so 'user denied tool execution' is false there"
         )
+
+    def test_cascade_site_branches_on_provenance(self):
+        # The cascade answers ``reject_tool`` for every remaining member of a
+        # denied batch, and its attribution depends on WHO denied the first
+        # member: a host auto-decline must steer a cause-specific correction,
+        # while a person's own refusal keeps kiro-cli's generic message TRUE
+        # for the remainder and stays exempt. Guarded at source level because
+        # the branch lives inside the turn coroutine, where the direct unit
+        # fixtures of this file cannot reach it.
+        src = self._src()
+        anchor = 'if getattr(slot, "_batch_rejected", False):'
+        assert anchor in src, "the cascade site moved -- guard is stale"
+        block = src.split(anchor, 1)[1][:3500]
+        steer_at = block.find("_steer_policy_notice")
+        reject_at = block.find("reject_tool(")
+        assert steer_at != -1, "host-caused cascade no longer steers a notice"
+        assert reject_at != -1, "the cascade site no longer answers the rejection"
+        # Steer while the permission request is still unanswered: that is what
+        # proves the turn is in flight and keeps the notice queued, so a steer
+        # placed after the reject can be silently dropped.
+        assert steer_at < reject_at, "the cascade steers AFTER answering the rejection"
+        assert (
+            "DENY_CAUSE_BATCH_CASCADE" in block[:reject_at]
+        ), "the cascade steer lost its cause-specific wording"
+        # The steer must be GATED on host provenance -- steering for a batch the
+        # person themselves refused would re-attribute their own decision.
+        assert (
+            "_batch_rejected_cause" in block[:steer_at]
+        ), "the cascade steer is no longer gated on rejection provenance"
+        assert (
+            "deny-notice-exempt:" in block[:reject_at]
+        ), "the user-originated cascade lost its exemption marker"
+
+    def test_every_host_decline_arm_records_provenance(self):
+        # Four host-side auto-declines reach the batch setter with
+        # ``outcome == "rejected"``: both Slack-delivery-failure arms, the
+        # no-budget branch, and the approval timeout. Each must overwrite the
+        # per-tool cause IN ITS OWN BRANCH, and the setter must copy it onto
+        # the slot -- an arm that forgets leaves its cascade indistinguishable
+        # from a user refusal, which is exactly the cause-blindness this
+        # provenance exists to remove. Anchored per arm rather than a file-wide
+        # tally: a tally stays green when one arm loses its assignment while
+        # another site gains one. Each window is wide enough to hold the arm's
+        # own assignment but too narrow to reach the next arm's (the nearest
+        # foreign assignment sits ~1.8k chars past the slack-None landmark).
+        src = self._src()
+        arm_anchors = (
+            (
+                "slack delivery-failure (None branch)",
+                "Linked approval delivery to Slack failed; auto-rejecting tool %r",
+                1000,
+            ),
+            (
+                "slack delivery-failure (except arm)",
+                "Error mirroring approval prompt to Slack",
+                800,
+            ),
+            ("no-budget", "format_approval_no_budget_card()", 400),
+            ("approval timeout", "format_approval_timeout_card(_approval_window)", 400),
+        )
+        missing = []
+        for arm, anchor, window in arm_anchors:
+            assert (
+                src.count(anchor) == 1
+            ), f"the {arm} arm's source landmark is no longer unique -- guard is stale"
+            if "_host_deny_cause = (" not in src.split(anchor, 1)[1][:window]:
+                missing.append(arm)
+        assert not missing, (
+            f"these host auto-decline arms no longer record a cause: {missing} -- "
+            "their cascades are again indistinguishable from a user refusal"
+        )
+        assert (
+            "slot._batch_rejected_cause = _host_deny_cause" in src
+        ), "the batch setter no longer copies the decline's provenance onto the slot"
+
+    def test_flag_and_provenance_clear_together(self):
+        # A stale cause is never READ today (the flag gates the only reader and
+        # the setter overwrites before any read), so no behavioural test can pin
+        # these clears -- but letting them drift apart falsifies the slot
+        # field's documented "set together, cleared together" contract and
+        # leaves a debugging trap. Pinned at source level: every clear of the
+        # flag must clear the provenance beside it.
+        src = self._src()
+        sites = [m.end() for m in re.finditer(r"slot\._batch_rejected = False", src)]
+        assert len(sites) >= 2, (
+            "expected the model-output clear and the turn-finally clear -- "
+            f"found {len(sites)} flag clear(s)"
+        )
+        unpaired = [
+            src[max(0, end - 160) : end].splitlines()[-1].strip()
+            for end in sites
+            if 'slot._batch_rejected_cause = ""' not in src[end : end + 120]
+        ]
+        assert (
+            not unpaired
+        ), f"these flag clears do not clear the provenance beside them: {unpaired}"
