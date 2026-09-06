@@ -27,6 +27,7 @@ import logging
 from aiohttp import web
 
 from kiro_crew.dashboard.chat_persistence import _save_slot_to_history
+from kiro_crew.dashboard.chat_replay import discard_replay_for_slot
 from kiro_crew.dashboard.chat_runner import _run_chat, _start_next_queued_turn
 from kiro_crew.dashboard.chat_utils import (
     effective_session_key,
@@ -402,6 +403,10 @@ async def api_chat_slot_rewind(request: web.Request) -> web.Response:
                 is the only thing that keeps live state matching it. No await
                 inside, so it is atomic on the event loop.
                 """
+                # dashboard.replay_from_acp: the transcript is rewritten below, so the resume
+                # replay must not be rendered over it again (see chat_replay). Placed AFTER
+                # every authorization/validation gate so a refused request discards nothing.
+                discard_replay_for_slot(state.sessions, slot)
                 slot.messages = prospective_slot.messages
                 # Remove only the entries captured in the pre-await snapshot:
                 # an entry queued while the boundaries were pending belongs to

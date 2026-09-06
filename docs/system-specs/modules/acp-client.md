@@ -716,6 +716,32 @@ aggregating without it would discard the only identifying datum; both are also
 bounded by the requests this runtime issued, so neither has the after-teardown
 steady state.
 
+**Transcript-replay capture (`dashboard.replay_from_acp`, default off).** The
+`session/load` replay above is the agent's own record of the conversation, and
+by default it is the largest thing the counted-drop path swallows. With the flag
+on, `AcpRuntime(capture_replay=True)` — set by the provider factory from the
+config — makes `load_session()` arm a per-sid bucket before the request goes out
+and the reader append that sid's `session/update` frames to it (bounded by
+`_REPLAY_CAPTURE_MAX_FRAMES`; past the cap frames take the counted drop as
+before). The bucket is popped on every exit of the load, success or failure, so a
+failed or timed-out load never leaves an armed bucket for an id a later session
+might reuse, and the frames land on `AcpSessionHandle.replay_updates` in wire
+order. Nothing in the dispatch loop reads them: the only consumer is
+`dashboard/chat_replay.py`, which the slot-detail handler calls to rebuild a
+resumed session's transcript through the same `parse_session_update` the live
+path uses, overlaying from the JSONL only the rows the agent never saw (notices,
+approvals, steer/inject provenance, compaction banners). Measured against
+kiro-cli 2.21.0 (`research/acp-replay` in the operator workspace): the replay is
+authoritative for assistant text, thinking and every tool call's id / rawInput /
+rawOutput / status, while the v1/v2 engines collapse a tool's title to its raw
+name and drop `locations`, and no engine before v3 stamps a `messageId` — which
+is why the JSONL keeps being written and the overlay is keyed on `tool_call_id`
+and prompt-text containment rather than on a message identity. A second
+`session/load` for a sid a live process already holds is refused
+(`Session is active in another process`), so the frames are only ever available
+at the gateway's own resume; a dashboard cannot ask kiro-cli to replay a
+resident session on demand.
+
 **An oversize stdout line is a dropped frame, not a dead runtime.** A single
 JSON-RPC line over the reader's `_STDOUT_BUFFER_LIMIT` (10 MB) used to
 `_mark_dead` the runtime, which fails every pending future and poisons every

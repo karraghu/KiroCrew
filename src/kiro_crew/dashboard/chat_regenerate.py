@@ -8,6 +8,7 @@ import logging
 from aiohttp import web
 
 from kiro_crew.dashboard.chat_persistence import _save_slot_to_history
+from kiro_crew.dashboard.chat_replay import discard_replay_for_slot
 from kiro_crew.dashboard.chat_runner import _run_chat
 from kiro_crew.dashboard.kiro_readiness import reject_if_kiro_unverified
 from kiro_crew.dashboard.remote_relay import remote_bound_refusal
@@ -82,6 +83,10 @@ async def api_chat_slot_regenerate(request: web.Request) -> web.Response:
         if len(variants) > _MAX_VARIANTS:
             variants = variants[-_MAX_VARIANTS:]
 
+        # dashboard.replay_from_acp: the transcript is rewritten below, so the resume
+        # replay must not be rendered over it again (see chat_replay). Placed AFTER
+        # every authorization/validation gate so a refused request discards nothing.
+        discard_replay_for_slot(state.sessions, slot)
         del slot.messages[u_idx + 1 :]
         slot.invalidate_source_links()
         slot._dirty = True
@@ -184,6 +189,10 @@ async def api_chat_slot_switch_variant(request: web.Request) -> web.Response:
             return web.json_response(
                 {"error": "corrupt variant entry", "code": "variant_corrupt"}, status=400
             )
+        # dashboard.replay_from_acp: the transcript is rewritten below, so the resume
+        # replay must not be rendered over it again (see chat_replay). Placed AFTER
+        # every authorization/validation gate so a refused request discards nothing.
+        discard_replay_for_slot(state.sessions, slot)
         target_dict: dict = target
         target_dict["content"] = chosen.get("content", "")
         slot.invalidate_source_links()
@@ -279,6 +288,10 @@ async def api_chat_slot_edit_resend(request: web.Request) -> web.Response:
                 {"error": "index or ts required", "code": "index_or_ts_required"}, status=400
             )
 
+        # dashboard.replay_from_acp: the transcript is rewritten below, so the resume
+        # replay must not be rendered over it again (see chat_replay). Placed AFTER
+        # every authorization/validation gate so a refused request discards nothing.
+        discard_replay_for_slot(state.sessions, slot)
         del slot.messages[index:]
         slot._dirty = True
         slot._resumed_count = 0

@@ -502,6 +502,12 @@ class AcpSessionHandle:
         # When True, destroy() skips the transcript unlink (subagent
         # continuability: the transcript is spawn_continue's resume material).
         self.keep_transcript = False
+        # The session/update frames kiro-cli replayed while this session was
+        # being resumed via session/load — raw ``params`` dicts in wire order.
+        # Filled by AcpRuntime.load_session() only when the runtime captures
+        # replay (dashboard.replay_from_acp); otherwise empty. Read by the
+        # dashboard's transcript-from-replay path, never by the dispatch loop.
+        self.replay_updates: list[dict[str, Any]] = []
         # Watchdog windows are snapshotted here (construction time) so the
         # dispatch loop never reads config; the liveness oracle carries the
         # per-session evidence state (tracked child, counter samples).

@@ -675,6 +675,11 @@ interface ChatState {
   slotStopping: boolean
   slotState: SlotState
   slotStatusDetail: Record<string, { kind: string; text: string; ts: number; toolName?: string; toolCallId?: string }>
+  /** Where a slot's hydrated transcript came from (GET /api/chat/slots/{slot}
+   *  `transcript_source`). `acp_replay` only when `dashboard.replay_from_acp`
+   *  rebuilt the rows from kiro-cli's session/load replay; the report counts
+   *  rows per source so the banner can say how much the replay carried. */
+  slotTranscriptSource: Record<string, { source: string; report?: { replay: number; jsonl: number; turns: number } }>
   slotHasMore: boolean
   slotOldestIndex: number
   /** Slot the cursor above describes. A switch moves activeSlot first, so
@@ -963,6 +968,7 @@ const initialState: ChatState = {
   slotStopping: false,
   slotState: 'idle',
   slotStatusDetail: {},
+  slotTranscriptSource: {},
   slotHasMore: false,
   slotOldestIndex: 0,
   slotCursorKey: null,
@@ -1839,7 +1845,7 @@ async function fetchSlotDetail(key: string, limit?: number) {
   // unbounded to keep the one-arg shape.
   const d = await (limit === undefined ? api.chatSlotDetail(key) : api.chatSlotDetail(key, limit))
   type QueueItem = string | { content: string; id: string }
-  return { key, boundedRead: limit !== undefined, nextBefore: d.next_before || 0, messages: filterMessages(d.messages || []), running: d.running || false, stopping: d.stopping || false, hasMore: d.has_more || false, total: d.total || 0, queue: ((d.queue || []) as QueueItem[]).map((q: QueueItem) => typeof q === 'string' ? { content: q, queueId: crypto.randomUUID(), ts: new Date().toISOString() } : { content: q.content, queueId: q.id, ts: new Date().toISOString() }), context: d.context_pct != null ? { pct: d.context_pct, used: d.context_used_tokens ?? undefined, window: d.context_window_tokens ?? undefined } : undefined }
+  return { key, boundedRead: limit !== undefined, nextBefore: d.next_before || 0, messages: filterMessages(d.messages || []), running: d.running || false, stopping: d.stopping || false, hasMore: d.has_more || false, total: d.total || 0, queue: ((d.queue || []) as QueueItem[]).map((q: QueueItem) => typeof q === 'string' ? { content: q, queueId: crypto.randomUUID(), ts: new Date().toISOString() } : { content: q.content, queueId: q.id, ts: new Date().toISOString() }), context: d.context_pct != null ? { pct: d.context_pct, used: d.context_used_tokens ?? undefined, window: d.context_window_tokens ?? undefined } : undefined, transcriptSource: typeof d.transcript_source === 'string' ? { source: d.transcript_source, report: d.replay_report } : undefined }
 }
 
 /** SINGLE hydration path for the slot-detail context-meter fields — the one
@@ -5416,6 +5422,12 @@ const chatSlice = createSlice({
         const comparable = (action.payload as { comparableTotal?: number }).comparableTotal
         retainServerTotal(state, key, comparable ?? action.payload.total, running,
           undefined, comparable !== undefined || action.payload.boundedRead)
+        // Provenance is per RESPONSE: a later fetch that carries none (flag turned
+        // off, provider gone, rotated archive) must clear it or the banner lies.
+        // Optional access: test fixtures and persisted states predating the field
+        // build ChatState without it.
+        if (action.payload.transcriptSource) (state.slotTranscriptSource ??= {})[safeKey(key)] = action.payload.transcriptSource
+        else if (state.slotTranscriptSource) delete state.slotTranscriptSource[safeKey(key)]
         state.slotState = running ? 'streaming' : 'idle'
         // Mark stale permissions as resolved so ApprovalBar ignores them
         if (!running) {
@@ -5627,6 +5639,12 @@ const chatSlice = createSlice({
         if (isUnsafeKey(key)) return
         if (state.activeSlot !== key) return  // user switched away
         retainServerTotal(state, key, action.payload.total, running, undefined, action.payload.boundedRead)
+        // Provenance is per RESPONSE: a later fetch that carries none (flag turned
+        // off, provider gone, rotated archive) must clear it or the banner lies.
+        // Optional access: test fixtures and persisted states predating the field
+        // build ChatState without it.
+        if (action.payload.transcriptSource) (state.slotTranscriptSource ??= {})[safeKey(key)] = action.payload.transcriptSource
+        else if (state.slotTranscriptSource) delete state.slotTranscriptSource[safeKey(key)]
         // Merge permission messages: prefer state perms (have frontend resolved flags)
         // but include API perms for any we don't have locally (e.g. arrived while disconnected)
         const statePerms = new Map<string, typeof state.messages[0]>()

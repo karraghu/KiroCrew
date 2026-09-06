@@ -59,6 +59,7 @@ from kiro_crew.agent_sdk.backend_install import (
     probe_backend,
     probe_backends,
 )
+from kiro_crew.agent_sdk.drivers.acp import fold_replay_updates
 from kiro_crew.agent_sdk.native_commands import NativeCommandBatch, run_kiro_native_commands
 
 TURN_STOP_REASON_CANCELLED = "cancelled"
@@ -84,6 +85,7 @@ __all__ = [
     "BackendInstallState",
     "NativeCommandBatch",
     "clear_probe_cache",
+    "fold_replay_updates",
     "probe_backend",
     "probe_backends",
     "run_kiro_native_commands",
