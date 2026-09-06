@@ -39,11 +39,11 @@ index, first-time setup, and connecting messaging channels.
 | [Agents](agents.md) | Switch between specialized agents per conversation, thread, or cron job |
 | [Skills](skills.md) | Drop-in markdown knowledge packs for domain-specific workflows |
 | [Dynamic Workflows](workflows.md) | Multi-phase agent orchestration authored from a plain-language goal: watch a run, restart part of it from cache, save it for reuse |
-| [Artifacts](dashboard.md) | Save, version, and revert generated UI and documents so they outlive the chat scrollback |
-| [Monitor Loops](subagents.md) | Keep one session checking something on an idle interval — a pull request, a CI run, a deployment — until an exit condition fires |
-| [Session Ledger](task-runner.md) | A durable per-session record of goal, phase, and next step that survives context compaction |
-| [Browser Control](configuration.md) | Drive a real web page from the dashboard's Browser panel: navigate, snapshot, click, type, screenshot |
-| [Computer Use](configuration.md) | Read and drive native desktop applications through the accessibility layer; opt-in and off by default |
+| [Artifacts](artifacts.md) | Save, version, and revert generated UI and documents so they outlive the chat scrollback |
+| [Monitor Loops](monitor-loops.md) | Keep one session checking something on an interval — a pull request, a CI run, a deployment — until an exit condition fires |
+| [Session Ledger](session-ledger.md) | A durable per-session record of goal, phase, and next step that survives context compaction |
+| [Browser Control](browser-control.md) | Drive a real web page from the dashboard's Browser panel: navigate, snapshot, click, type, screenshot |
+| [Computer Use](computer-use.md) | Read and drive native desktop applications through the accessibility layer; opt-in and off by default |
 
 ## Additional Features
 
@@ -75,16 +75,16 @@ documented by their own in-panel help.
 | Voice | Speech-to-text and spoken replies | [Configuration](configuration.md) |
 | Notifications | Where a proactive message is delivered | — |
 | Shortcuts | Keyboard bindings | — |
-| Skills | Installed skills and where they are loaded from | [Skills](skills.md) |
+| Skills | Whether sessions auto-generate skills, and whether a generated one needs your approval; installed skills live under Agent Capabilities | [Skills](skills.md) |
 | Channels | Per-channel setup and access control | [Channel capabilities](channel-capabilities.md) |
-| Browser | Installing the browser CLI and the attach token | — |
-| Computer Use | Driving native desktop apps; off by default | — |
-| Webhooks | Inbound tokens and request signing | [Inbound webhooks](inbound-webhooks.md) |
+| Browser | Installing the browser engine and the attach token | [Browser control](browser-control.md) |
+| Computer Use | Driving native desktop apps; off by default | [Computer use](computer-use.md) |
+| Webhooks | Inbound tokens and request signing — hidden unless you enable it under Feature Previews | [Inbound webhooks](inbound-webhooks.md) |
 | Instances | Additional gateways this dashboard can reach | — |
 | Privacy | What leaves the host | [Snapshot and restore](snapshot-and-restore.md) |
 | Security | The sandbox, denied commands, and the audit log | [Blocked commands](blocked-commands.md) |
 | Secrets | The encrypted credential vault | [Secrets vault](secrets-vault.md) |
-| Developer | Logs, metrics, storage, agent backend, feature previews | [Dashboard](dashboard.md) |
+| Developer | The Developer Mode consent switch, plus an optional local-gateway toggle; turning it on adds a separate Developer page that holds logs, metrics, storage and the rest | [Dashboard](dashboard.md) |
 | Releases | Update channel and version | [Getting Started](getting-started.md) |
 | About | Version and links | — |
 

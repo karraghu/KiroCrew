@@ -39,6 +39,11 @@ organized for someone browsing the repository.
 | [snapshot-and-restore.md](snapshot-and-restore.md) | Backing up and restoring Kiro Crew state. |
 | [workflows.md](workflows.md) | Multi-phase agent runs you can watch, restart in part, and save for reuse. |
 | [secrets-vault.md](secrets-vault.md) | Storing credentials encrypted where the agent cannot read them. |
+| [monitor-loops.md](monitor-loops.md) | Keeping one session checking something on an interval until an exit condition fires. |
+| [session-ledger.md](session-ledger.md) | The durable per-session work record that survives context compaction. |
+| [artifacts.md](artifacts.md) | Saving, versioning, and reverting generated UI and documents. |
+| [computer-use.md](computer-use.md) | Reading and driving native desktop applications; opt-in and off by default. |
+| [browser-control.md](browser-control.md) | Driving a real web page from the dashboard's Browser panel. |
 
 ## Channels
 

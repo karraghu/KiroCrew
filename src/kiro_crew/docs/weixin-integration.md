@@ -114,6 +114,7 @@ credential store) and overrides `weixin.token`.
 - [Channel capabilities](channel-capabilities.md): the ten-channel matrix — streaming, buttons, uploads, reply length, approval timeout
 - [Getting Started](getting-started.md): install, first run, connecting a channel
 - [Configuration](configuration.md): the config file and environment variables
+
 ## Attribution
 
 The iLink protocol layer (endpoints, auth headers, QR login, long-poll cursor)

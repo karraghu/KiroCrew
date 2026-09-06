@@ -5,9 +5,8 @@ this channel stream, does it render buttons, can it take a file, how long a repl
 fits, and how long an approval prompt waits. Read it before you pick a channel,
 or when a channel behaves differently from the one you are used to.
 
-Each channel declares these values in code, and a test forces every capability to
-be classified rather than left implicit — so a ✅ here means the behaviour exists
-today, not that the platform could support it.
+A ✅ means Kiro Crew supports that behaviour on that channel today, not that the
+platform could support it.
 
 ## The matrix
 
@@ -23,7 +22,7 @@ today, not that the platform could support it.
 | Renders markdown tables natively | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
 | Reply length before splitting | 3900 chars | 1900 chars | 4000 chars | 16000 chars | 1750 chars (7000 bytes) | 5120 chars (20480 bytes) | 4000 chars | 4000 chars | 4096 chars | 4000 chars |
 | Tappable choices per prompt | 10 | 25 | 25 | 5 | 5 | 0 | 0 | 0 | 0 | 0 |
-| Approval prompt waits | 120s | 300s | 300s | 300s | 300s | 300s | 300s | 300s | 300s | 300s |
+| Approval prompt waits | 120s | 300s | 300s | 300s | 300s | — | — | — | 300s | — |
 | Agent can message you first | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Dashboard link is two-way | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
@@ -53,14 +52,22 @@ marker, so a Slack thread does continue its session.
 
 ## Approval timeouts
 
-Three different windows ship, and the difference is deliberate:
+Only six channels ask you at all. Slack, Discord, Telegram, Teams, Webex and
+WhatsApp install an approval decider, so a tool that needs permission produces a
+prompt and waits:
 
 - **Slack: 120 seconds.** Slack has its own approval path with a shorter window
   than every other channel.
-- **Teams: 300 seconds**, from its own Adaptive Card approval path.
-- **Everything else: 300 seconds**, from the shared text-approval ladder.
+- **Discord, Telegram, Teams, Webex, WhatsApp: 300 seconds.**
 
 An unanswered prompt is **denied**, never approved — the timeout never means yes.
+
+**WeCom, Weixin, iMessage and Feishu never prompt.** None of them can render
+approve/deny controls, so in `interactive` mode a tool needing permission is
+refused straight away: nothing is posted and there is no window to answer in. The
+`—` in that row means exactly this, not "unlimited". To run tools on those
+channels, set the approval mode to `auto` or `trust` — see the channel's own
+guide.
 
 `agent.tool_approval_timeout_secs` (default 600) does **not** govern any of
 these. It applies only to the dashboard chat path. Changing it will not lengthen
@@ -68,12 +75,26 @@ or shorten the window on any messaging channel.
 
 ## Owner DM targets
 
-`send_message` with a channel target reaches every channel except **WeCom** and
-**Weixin**. Both fold identities learned from inbound traffic into their
-send roster, so "the owner" could resolve to any peer who once messaged the bot.
-Rather than risk delivering to the wrong person, both are excluded from
-owner-DM routing entirely. A `send_message` aimed at either will not arrive; use
-the dashboard, or a channel that is on the roster.
+`send_message` has two different routes, and they differ in what they can reach.
+
+The **owner-DM route** (`session=<channel>`) infers a recipient: it needs exactly
+one allow-listed destination configured on that channel, and it needs the channel
+to be able to send unprompted. Three channels cannot use it:
+
+- **WeCom** and **Weixin** are excluded outright. Both fold identities learned
+  from inbound traffic into their send roster, so "the owner" could resolve to any
+  peer who once messaged the bot, and guessing is worse than refusing.
+- **Feishu** is accepted but cannot deliver, because it only ever replies to an
+  inbound message and has nowhere to put an unprompted one.
+
+In all three cases the call falls back to a dashboard notification and says so
+rather than reporting success. An ambiguous allow-list or a channel that is not
+connected falls back the same way.
+
+The **conversation route** (`channel_type`) addresses the conversation you are
+already in rather than inferring a recipient, so it *does* work on WeCom and
+Weixin. Add a destination id to aim it somewhere specific; the channel's
+allow-list is re-checked when the message is sent.
 
 ## Related docs
 

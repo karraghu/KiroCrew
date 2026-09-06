@@ -281,6 +281,7 @@ and exact, so `/stop the presses` reaches the agent as a sentence.
 - [Channel capabilities](channel-capabilities.md): the ten-channel matrix — streaming, buttons, uploads, reply length, approval timeout
 - [Getting Started](getting-started.md): install, first run, connecting a channel
 - [Configuration](configuration.md): the config file and environment variables
+
 ## Attribution
 
 Protocol layer by [neonize](https://github.com/krypton-byte/neonize)
