@@ -398,28 +398,13 @@ chat. Read the [security architecture](docs/architecture/security-deep-dive.md) 
 
 ## Install, configure, and operate
 
-**Installer details.** The installer resolves the channel feed, verifies the wheel's SHA-256 against
-the published manifest, installs through `pipx` when available or a managed
-virtual environment at `~/.kiro/crew-venv` (beside the data home; override with
-`KIROCREW_VENV`), and records the channel in `~/.kiro/crew/channel`. The channels
-are `stable`, `insider`, and `nightly`, and `KIROCREW_CHANNEL` sets the default.
-On Linux and macOS, when the system lacks a Python 3.12+ interpreter the
-installer provisions one itself — no package manager, no sudo: it downloads a
-SHA-256-pinned [uv](https://docs.astral.sh/uv/) binary (or uses your installed
-`uv`) and installs a python-build-standalone CPython 3.12 into
-`~/.kiro/crew-python`. Pass `--managed-python` to always use the provisioned
-interpreter and skip the system ones. The
-signed installer never pipes an unsigned third-party script into a shell.
-
-**Pin an exact wheel.** You can also install one exact wheel directly and pin it to its published
-SHA-256. Every version directory publishes a `SHA256SUMS` file next to the
-wheel, so take the hash for your wheel from there and put it in the URL
-fragment. `pip` verifies the hash and does not consult a package index for
-Kiro Crew itself:
-
-```bash
-pip install "https://download.crew.kiro.dev/cli/stable/<version>/kirocrew-<version>-py3-none-any.whl#sha256=<sha256>"
-```
+**Installer details.** The installer verifies the wheel's SHA-256, installs through `pipx` or a
+managed virtual environment, provisions its own CPython 3.12 when the system has
+none, and records the channel — `stable`, `insider`, or `nightly` — in
+`~/.kiro/crew/channel`. The mechanics, the env vars that override each path, and
+the two `pip` forms for a published wheel (channel index, or one wheel pinned by
+hash) are in
+[Installing and Building](docs/guides/install.md#c-self-contained-pip-wheel).
 
 **Semantic memory.** Semantic memory needs no setup. Embeddings run in-process, and the Gateway
 downloads its embedding model in the background on first start, verifies it,

@@ -188,7 +188,10 @@ one scope down:
   boundary, so writing back a setup-phase snapshot during teardown would drop the handler
   the teardown phase is capturing through.
 * `_restore_autonudge_singleton` puts `autonudge._INSTANCE` back to whatever the test
-  inherited. `AutoNudgeService.start()` publishes itself there and `stop()` clears it, so
+  inherited. It lives in `test/conftest.py` rather than the rootdir floor, because only
+  the `test/` suites drive the service; it is listed here because its failure shape is
+  the process-global one this section is about.
+  `AutoNudgeService.start()` publishes itself there and `stop()` clears it, so
   a test that starts the service — or drives a dashboard handler that does — leaves a live
   instance holding timer TASKS created on that test's event loop. Every later test in the
   same worker then reaches those tasks through the singleton on a loop that has since

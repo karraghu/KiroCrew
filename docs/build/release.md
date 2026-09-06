@@ -18,7 +18,7 @@ macOS signing mechanics and notary-credential rotation live in
 |---------|---------|---------------|
 | `nightly` | `nightly.yml`: cron `0 6 * * *` (06:00 UTC) plus manual dispatch, from `main` HEAD | `<base>-nightly.<YYYYMMDD>t<HHMMSS>` |
 | `insider` | `release.yml`: push of a prerelease tag (`v0.2.0-rc.1`) | `<x.y.z>-rc.N` |
-| `stable` | `release.yml`: push of a bare semver tag (`v0.2.0`) on a recorded candidate's commit; the run verifies and promotes that candidate's exact bytes, never rebuilding | Release identity `<x.y.z>`; artifacts retain the selected candidate's embedded `<x.y.z>rcN` version |
+| `stable` | `release.yml`: push of a bare semver tag (`v0.2.0`) on the cleared candidate's commit; the run REBUILDS from that commit under the bare version. Byte-for-byte republication of the candidate's artifacts happens only when `vars.STABLE_PROMOTE_BYTES` names that exact base | `<x.y.z>`; under `STABLE_PROMOTE_BYTES` the republished artifacts retain the candidate's embedded `<x.y.z>rcN` version |
 
 The channel name is a literal path segment everywhere (`cli/insider/...`,
 `feed/insider/...`, the `:insider` image tag), so there is no name-to-prefix

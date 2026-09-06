@@ -15,7 +15,10 @@ hand-rolling:
 `SearchInput`, `Badge`, `SourceBadge`, `StatCard`, `Skeleton`,
 `ContentSkeleton`, `SkeletonToggleRow`, `SkeletonField`, `SkeletonInfoRow`,
 `FormSkeleton`, `EmptyState`, `PanelSectionHeader`, `PageHeader`, `Toggle`,
-`Slider`, `Checkbox`, `Select`.
+`Slider`, `Checkbox`, `FilteredEmpty`.
+
+There is deliberately no `Select` primitive: use `SimpleSelect`,
+`SettingsSelect`, or `SearchableSelect`.
 
 The provenance pill is **`SourceBadge`**, not a badge named after any one source.
 Two implementations exist on purpose:

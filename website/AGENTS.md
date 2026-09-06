@@ -13,6 +13,7 @@ them.
 | If you are touching… | Read first |
 |---|---|
 | layout of a page, panels, headers | [page-layout](docs/page-layout.md) |
+| narrow screens, gutters, page zoom, touch gestures | [narrow-viewport](docs/narrow-viewport.md) |
 | themes, colors, CSS vars, stable class hooks | [theming-contract](docs/theming-contract.md) |
 | shared components, a11y, URL sanitization, data fetching | [frontend-conventions](docs/frontend-conventions.md) |
 | any user-facing string, date, number, or sort order | [i18n-catalog](docs/i18n-catalog.md) + [i18n gates](../docs/ci/i18n-gates.md) |

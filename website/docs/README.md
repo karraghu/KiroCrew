@@ -7,6 +7,7 @@ Backend and whole-system docs are in [`../../docs/`](../../docs/README.md).
 | Document | Covers |
 |---|---|
 | [page-layout.md](page-layout.md) | The page skeleton every dashboard page follows, and the layout patterns to copy. |
+| [narrow-viewport.md](narrow-viewport.md) | The measurement record behind the narrow-viewport recommendations: gutters, gestures, and the insets below the breakpoint. |
 | [theming-contract.md](theming-contract.md) | The CSS variable contract, the stable class hooks a theme may target, and what is deliberately not customizable. |
 | [frontend-conventions.md](frontend-conventions.md) | Shared components, accessibility, keyboard isolation for dialogs and the overlays above them, URL sanitization, data fetching, live-collection identity, animation, and styling. |
 | [i18n-catalog.md](i18n-catalog.md) | Catalog structure, key naming, plurals, and the formatting seam. |
