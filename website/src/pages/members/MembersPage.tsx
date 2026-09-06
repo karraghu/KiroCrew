@@ -604,8 +604,15 @@ export default function MembersPage() {
                       pane resolves the user's Content width setting itself
                       (transcript and composer both). The DM column is the
                       page's widest region, and an uncapped line length is
-                      unreadable on wide screens. */}
-                  <ChatPane slotKey={activeSlot} agentLocked frameless followContentWidth />
+                      unreadable on wide screens.
+
+                      steer-only: a DM is a conversation with one named
+                      member, not an operator console. Talking to a person has
+                      no "queue this until they finish" step, so a send while
+                      the member is working goes straight into its running
+                      turn — no Steer/Queue split, no queue stack. The main
+                      chat and split view keep the split button. */}
+                  <ChatPane slotKey={activeSlot} agentLocked frameless followContentWidth busyMode="steer-only" />
                 </ErrorBoundary>
               </div>
             ) : (

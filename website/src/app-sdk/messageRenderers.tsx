@@ -77,7 +77,9 @@ export interface MessageRenderer {
   render: (m: ChatMessage, ctx: MessageRenderContext) => React.ReactNode
 }
 
-function renderUserContent(content: string, meta: Record<string, unknown> | undefined): React.ReactNode {
+/** Exported so a host entry that REPLACES the `user` row (same id) draws the
+ *  same content — paste chips and all — and only changes the chrome around it. */
+export function renderUserContent(content: string, meta: Record<string, unknown> | undefined): React.ReactNode {
   // History load re-serves the fully-EXPANDED paste content alongside
   // meta.pastes. Handing a large paste (hundreds of KB / tens of thousands of
   // lines) straight to MarkdownRenderer parses + lays it out on the main thread
@@ -119,7 +121,7 @@ function renderUserContent(content: string, meta: Record<string, unknown> | unde
  * IDENTICALLY to the main chat's. `fmtMessageTime` elides the year only when it
  * is safe, so a message from a previous year is never dated to the current one.
  */
-function formatTs(ts?: string): string | undefined {
+export function formatTs(ts?: string): string | undefined {
   if (!ts) return undefined
   return fmtMessageTime(ts) || undefined
 }

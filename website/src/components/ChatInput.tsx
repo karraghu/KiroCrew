@@ -369,6 +369,9 @@ function applyHeight(
 /** Stable empty result for suppressed spawn-approval reads — a fresh [] per render would churn every dependent memo. */
 const EMPTY_SPAWN_APPROVALS: ReturnType<typeof selectSlotPendingSpawnApprovals> = []
 
+/** Busy-composer send affordance — see `ChatInputProps.busyMode`. */
+export type ComposerBusyMode = 'split' | 'steer-only'
+
 interface ChatInputProps {
   value: string
   onChange: (v: string) => void
@@ -392,6 +395,17 @@ interface ChatInputProps {
    * composer text and pending files itself (ChatPage) and clears them
    * atomically — ChatInput must NOT clear the value around this call. */
   onSteer?: () => void
+  /** How the BUSY composer offers its send. `'split'` (default): the
+   * Steer/Queue split button with its per-slot mode picker — the main chat
+   * and split-view panes. `'steer-only'`: the surface has no queue concept —
+   * while busy the plain send button stays in place and Enter/click steers
+   * into the running turn (or starts one when only sub-agents run). A
+   * conversation with ONE named peer (a member DM thread) uses it: talking to
+   * a person has no "wait until they finish, then they'll listen" step, so
+   * offering one would present a console control inside a chat. Needs
+   * `canSteer` + `onSteer` exactly like the split button; without a steer
+   * path the busy send still falls back to the queue button. */
+  busyMode?: ComposerBusyMode
   disabled?: boolean
   placeholder?: string
   prefillHint?: boolean
@@ -823,6 +837,7 @@ function ChatInput({
   onSend,
   canSteer,
   onSteer,
+  busyMode = 'split',
   disabled: disabledProp = false,
   placeholder = '',
   prefillHint,
@@ -1371,7 +1386,12 @@ function ChatInput({
   // not stopping, on a steer-capable slot, and the user hasn't switched the
   // split button to Queue. Everywhere else the composer falls back to onSend
   // (normal send, or server-side queue while busy).
-  const steerActive = isRunning && (!stopState || stopState === 'idle') && !!canSteer && !!onSteer && busySendMode === 'steer'
+  //
+  // `steer-only` has no Queue to switch to, so the persisted per-slot mode is
+  // not consulted: a slot that once picked Queue in the main chat must not
+  // silently queue from a surface that never shows that choice.
+  const steerOnly = busyMode === 'steer-only'
+  const steerActive = isRunning && (!stopState || stopState === 'idle') && !!canSteer && !!onSteer && (steerOnly || busySendMode === 'steer')
   const fireComposer = useCallback(() => {
     if (disabled) return
     // A batch dictation is still transcribing: block the send so the pending
@@ -3791,12 +3811,28 @@ function ChatInput({
               // waits for the turn to end and rides the idle send button.
               composerHasDraft ? (
                 canSteer && onSteer ? (
+                  steerOnly ? (
+                    // No queue concept on this surface: the busy send is the
+                    // SAME control as the idle one (colour, glyph, name), and
+                    // pressing it steers. Nothing splits, nothing to pick.
+                    <button
+                      className="primary w-8 h-8 rounded-full bg-accent text-accent-fg border-none flex items-center justify-center cursor-pointer hover:bg-accent-hover disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                      onClick={fireComposer}
+                      disabled={disabled || !connected}
+                      aria-label={i18nT('components.chatInput.send')}
+                      data-testid="steer-only-send"
+                      {...offlineProps(connected, 'send', i18nT('components.chatInput.send'))}
+                    >
+                      <ArrowUp size={18} />
+                    </button>
+                  ) : (
                   <BusySendButton
                     mode={busySendMode}
                     onModeChange={setBusySendMode}
                     onFire={fireComposer}
                     disabled={disabled}
                   />
+                  )
                 ) : (
                   <button className="w-8 h-8 rounded-full bg-warn text-warn-fg border-none flex items-center justify-center cursor-pointer hover:bg-warn/80 disabled:opacity-30 disabled:cursor-not-allowed transition-all" onClick={fireComposer} disabled={disabled} title={i18nT('components.chatInput.queue_message')} aria-label={i18nT('components.chatInput.queue_message')}>
                     <ArrowUpFromLine size={18} />
@@ -3805,6 +3841,17 @@ function ChatInput({
               ) : onStop ? (
                 <button className="w-8 h-8 rounded-lg bg-transparent border-none text-danger hover:bg-danger/10 flex items-center justify-center cursor-pointer transition-all" onClick={onStop} title={i18nT('components.chatInput.stop_generation')} aria-label={i18nT('components.chatInput.stop_generation')} data-testid="stop-button-armed">
                   <Square size={18} fill="currentColor" />
+                </button>
+              ) : steerOnly ? (
+                // Same shape-stability rule as the split case below, with the
+                // surface's own (plain) send button.
+                <button
+                  className="primary w-8 h-8 rounded-full bg-accent text-accent-fg border-none flex items-center justify-center cursor-not-allowed disabled:opacity-30 transition-all"
+                  disabled
+                  aria-label={i18nT('components.chatInput.send')}
+                  data-testid="steer-only-send"
+                >
+                  <ArrowUp size={18} />
                 </button>
               ) : (
                 // No stop affordance and nothing typed: keep the split button

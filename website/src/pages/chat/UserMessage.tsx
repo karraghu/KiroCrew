@@ -34,9 +34,15 @@ interface UserMessageProps {
   mode?: string
   pinned?: boolean
   onTogglePin?: () => void
+  /** Draw a confirmed steer as an ORDINARY user message: no "Steered into the
+   *  running turn" badge, no accent tint, no entrance ring. For a surface that
+   *  has no queue/steer concept to explain (a member DM thread, where every
+   *  send while the member works is a steer), the badge would label every
+   *  such send with the mechanics the surface exists to hide. */
+  hideSteerBadge?: boolean
 }
 
-const UserMessage = memo(function UserMessage({ content, meta, timestamp, timestampTitle, renderContent, canEdit, messageIndex, messageTs, onEditResend, slotKey, slotTitle, mode, pinned, onTogglePin }: UserMessageProps) {
+const UserMessage = memo(function UserMessage({ content, meta, timestamp, timestampTitle, renderContent, canEdit, messageIndex, messageTs, onEditResend, slotKey, slotTitle, mode, pinned, onTogglePin, hideSteerBadge }: UserMessageProps) {
   useLanguageGeneration() // memo() bails out of the provider-level repaint; subscribe directly
   const [editing, setEditing] = useState(false)
   const ime = useImeGuard()
@@ -84,7 +90,8 @@ const UserMessage = memo(function UserMessage({ content, meta, timestamp, timest
   // moment nothing is known, which is the claim this change exists to stop.
   const steerState = (meta as { steerState?: string } | undefined)?.steerState
   const steerOptimistic = !!(meta as { optimistic?: boolean } | undefined)?.optimistic
-  const isSteer = !!(meta && (meta as { steer?: boolean }).steer)
+  const isSteer = !hideSteerBadge
+    && !!(meta && (meta as { steer?: boolean }).steer)
     && steerState !== 'written'
     && steerState !== 'requeued'
     && !(steerOptimistic && !steerState)

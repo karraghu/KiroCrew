@@ -9608,6 +9608,7 @@
       "worktree_creation_returned_no_path": "La creación del worktree no devolvió ninguna ruta",
       "loading_earlier_messages": "Cargando mensajes anteriores…",
       "send_failed_with_error": "Error al enviar: {{error}}",
+      "send_failed_with_error_restored": "No se pudo enviar este mensaje: {{error}}. Tu texto ha vuelto al cuadro de redacción.",
       "delivery_unconfirmed": "Entrega sin confirmar: tu texto ha vuelto al cuadro de redacción; revisa la conversación antes de enviarlo de nuevo."
     },
     "chatSidebar": {
