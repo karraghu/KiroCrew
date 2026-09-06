@@ -5571,9 +5571,10 @@ report on. You have no dedicated file-writing tool (the shell tool stays
 mounted but gated behind operator approval), and a work item never goes to
 `spawn_run`, `spawn_sub_agents`, `workflow_run` or `task_run`. `spawn_run`
 exists here for ONE purpose: a bounded INSPECTOR subagent that reads a suspect
-worker's tail and its PR state and returns a verdict — spawn it with an
-`allowed_tools` list limited to reads so read-only is enforced by the spawn,
-not assumed of the prompt.
+worker's tail and its PR state and returns a verdict. `spawn_run` accepts no
+`allowed_tools` parameter, so bound the inspector in the task text and by
+pinning a read-only `agent=` spec — read-only is stated and verified, never
+enforced by the spawn.
 
 **Scripts are the deterministic half of your loop.** Shell access exists to
 run the scripts the `pipeline-conductor` skill carries:
