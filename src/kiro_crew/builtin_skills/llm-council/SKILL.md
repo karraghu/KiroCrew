@@ -1,9 +1,8 @@
 ---
 name: llm-council
-description: Convene a cross-vendor LLM council — the main session acts as Chairman and spawns several subagents, each pinned to a DIFFERENT model (Anthropic / OpenAI / DeepSeek / Zhipu / Qwen / etc. via kiro-cli). Three modes — synthesis (independent answers merged into one), vote (structured ballots + majority tally), and adversarial (red-team a target artifact into a SHIP/REVISE/REJECT verdict). Use for hard, high-stakes, ambiguous, or subjective questions, group decisions, or reviews where a second (and third) opinion from different model families adds real signal. Triggers include "ask the council", "convene the council", "council on this", "get a panel of models", "vote on this", "have the models vote", "red-team this", "adversarial review", "what would other models say", "cross-check this with other models", "second opinion from multiple models".
-version: 0.1.0
-triggers: ask the council, convene the council, council, panel of models, vote on this, models vote, red-team, adversarial review, other models say, cross-check with other models, second opinion from multiple models, multi-model
-tags: [skill, council, multi-model, cross-vendor, spawn_run, subagents, vote, review]
+description: Convene a cross-vendor LLM council — the main session acts as Chairman and spawns several subagents, each pinned to a DIFFERENT model (Anthropic / OpenAI / DeepSeek / Zhipu / Qwen / etc. via kiro-cli). Three modes — synthesis (independent answers merged into one), vote (structured ballots + majority tally), and adversarial (red-team a target artifact into a SHIP/REVISE/REJECT verdict). Use for hard, high-stakes, ambiguous, or subjective questions, group decisions, or reviews where a second (and third) opinion from different model families adds real signal.
+triggers: ask the council, convene the council, council on this, panel of models, vote on this, models vote, red-team, adversarial review, other models say, cross-check with other models, second opinion from multiple models
+inject_on_trigger: false
 ---
 
 # LLM Council
@@ -41,11 +40,24 @@ model runs**. It is a deliberate, occasional move. If unsure it's worth it, ask 
    --format json`, then pick a **strong general model from each of 3–4 different
    vendors** (e.g. Anthropic, OpenAI, DeepSeek, Zhipu) — cross-vendor diversity is the
    payoff. Skip deprecated or restricted-use models unless opted in. Honor a
-   user-supplied roster verbatim.
+   user-supplied roster verbatim. `--list-models` is a CATALOG, not an entitlement:
+   a listed model can still be unavailable to this session, so keep a fallback pick
+   for each slot. `reasoning_effort` ('low' | 'medium' | 'high' | 'xhigh' | 'max') is
+   batch-wide and wins over the configured role pin — setting it forces one dedicated
+   process per subagent (~3-5s start, ~400 MB each, against ~200ms and near-zero for
+   session sharing), which is worth it for `adversarial` on a high-stakes artifact and
+   wasteful for a cheap `vote`.
 2. **Fan out — one `spawn_run` PER member.** ⚠️ `spawn_run`'s `model` applies to the
    whole call, so a multi-model panel is N separate calls, each a single `task` with a
-   distinct `model` — NOT one call with a `tasks` array. Use the mode's member prompt
-   (below) as the `task`. Keep a private map of `subagent id → model`.
+   distinct `model` — NOT one call with a `tasks` array. (`agents` varies per task;
+   `model` does not.) Use the mode's member prompt (below) as the `task`. Keep a
+   private map of `subagent id → model`. Pass `include_memory=false` on every member
+   spawn: the member prompt is self-contained, and inherited memory re-imports the
+   Chairman's framing into every supposedly independent answer, which is the shared
+   bias a council exists to break. `include_lessons=false` too unless a member will
+   write code; keep `include_project=true` when the question is about code in the
+   active project. Each member is told by name which groups were withheld, so it
+   reports the gap instead of inventing context.
 3. **Wait for ALL `[Subagent completion event]`s.** Do NOT answer the task yourself
    while waiting. If a member fails, drop it and proceed (a council of 2 is still a
    council); abort only if zero return.
@@ -72,7 +84,7 @@ bias by the task:
 **Chairman:** the main session by default; use a top-tier synthesizer (an Anthropic
 Opus/Sonnet-class model) when the panel diverges or stakes are high.
 
-**Agent selection (only when the conductor skill is enabled).** If KiroCrew's
+**Agent selection (only when the conductor skill is enabled).** If Kiro Crew's
 **conductor skill** is on — you will see its agent-roster routing table loaded in your
 context — a member may be an **(agent, model) tuple** rather than a bare model: pass
 `spawn_run(agent="<roster-name>", model="<id>")` to run a specialist agent (e.g. a code
@@ -197,16 +209,19 @@ allowlist only what research needs. Advisors research + reason; they never act.
 Append the research clause (already in the member prompts above) to the vote and
 adversarial member prompts too.
 
-**Backend caveat (important):** on the `acp` (kiro-cli) backend, `spawn_run` has NO
-per-subagent tool scope — `allowed_tools` is ignored, and members INHERIT the main
-session's trusted tools. Under a `yolo`/trust-all session that means they inherit
-EVERYTHING, including write/exec. So the read-only restriction is currently enforced
-by the member PROMPT, not by config — keep that clause in.
+**Backend caveat (important):** the MCP `spawn_run` tool exposes no `allowed_tools`
+parameter, so a council you spawn cannot be tool-scoped by configuration — members
+INHERIT the main session's trusted tools, and under a `yolo`/trust-all session that
+includes write and exec. The read-only restriction is therefore enforced by the
+member PROMPT; keep that clause in. `allowed_tools` itself IS honored on the ACP
+backend — `kas_permissions.allowed_tools_to_permissions` converts it into a KAS
+inline policy that is then ceiling-clamped, and shipped in-process callers pass it —
+it is simply not reachable from `spawn_run`.
 
-> **Future work: add trust profiles to `spawn_run`.** Give `spawn_run` /
-> `SubagentManager` a per-subagent trust profile (a read-only tool allowlist) honored
-> on the ACP backend, so council members are config-scoped to the read-only research
-> set above instead of relying on a prompt guardrail.
+> **Future work: expose `allowed_tools` on `spawn_run`.** Surface the per-subagent
+> tool allowlist the ACP backend already enforces, so council members are
+> config-scoped to the read-only research set above instead of relying on a prompt
+> guardrail.
 
 ## Presenting to the user
 
@@ -217,7 +232,7 @@ changes.
 
 ## Ceiling / upgrade path
 
-Prompt-and-orchestration only — no KiroCrew core changes. If it proves valuable,
+Prompt-and-orchestration only — no Kiro Crew core changes. If it proves valuable,
 promote to a first-class `council` MCP tool over `SubagentManager` (which already
 accepts a per-subagent `model=`) or a `workflow_run` template — a monitorable,
 one-call primitive with per-member model + mode selection, and a read-only tool

@@ -1,10 +1,11 @@
 ---
 name: kirocrew-commands
-description: Complete CLI reference for KiroCrew commands. Use for help, commands, setup, how to, what can you do, getting started, onboarding.
+description: Complete CLI reference for Kiro Crew commands. Use for help, commands, setup, how to, what can you do, getting started, onboarding.
 always: false
 triggers: help, commands, setup, gateway, how to, what can you do, getting started, onboard, browse, auth, doctor, cron, artifact, memory, snapshot, eval, security, kirocrew pod, pod up, pod down, pod ls, pod status, pod logs, pod provision, pod install, pod token
+inject_on_trigger: false
 ---
-# KiroCrew CLI Reference
+# Kiro Crew CLI Reference
 
 ## Setup & System
 
@@ -14,9 +15,22 @@ triggers: help, commands, setup, gateway, how to, what can you do, getting start
 | `kirocrew setup --slack` | Also run the guided Slack credential setup (opt-in; ignored with `--agent-only`) |
 | `kirocrew setup --agent-only` | Only install kiro-cli agent config, skip the other wizard steps |
 | `kirocrew setup --clean` | Fresh install — don't merge from existing config |
-| `kirocrew doctor` | Verify KiroCrew setup (checks all dependencies) |
-| `kirocrew update` | Update KiroCrew to the latest version |
+| `kirocrew doctor` | Verify Kiro Crew setup (checks all dependencies) |
+| `kirocrew doctor --bundle` | Collect logs + crash reports into a redacted diagnostics zip |
+| `kirocrew update` | Update Kiro Crew to the latest version |
+| `kirocrew update approve` | Approve a pending in-app update armed from the dashboard |
+| `kirocrew update --force` | Discard local commits when a git checkout has diverged from upstream (git installs only) |
 | `kirocrew --version` | Print installed version |
+| `kirocrew sandbox status` | Report whether this launch is covered by the userns AppArmor profile |
+| `kirocrew sandbox install-profile` | Attach the profile to this app (sudo; `--path P` for an explicit executable) |
+| `kirocrew sandbox remove-profile` | Unload and remove the profile (sudo) |
+
+`update --force` is destructive on a git install: the hard reset discards local
+commits, recoverable only from `git reflog`. The `sandbox` verbs matter only on
+hosts with `kernel.apparmor_restrict_unprivileged_userns=1` (Ubuntu 23.10+ and
+derivatives) and are no-ops everywhere else; `--path` is refused for
+world-writable locations and for shared interpreters such as `/usr/bin/python3`,
+which would over-grant.
 
 ## Gateway (Server)
 
@@ -32,11 +46,18 @@ triggers: help, commands, setup, gateway, how to, what can you do, getting start
 | `kirocrew gateway --approval yolo` | Auto-approve all tools (requires isolated KIROCREW_HOME) |
 | `kirocrew gateway --approval interactive` | Prompt for every tool (default) |
 | `kirocrew gateway --seed FIXTURE` | Seed $KIROCREW_HOME from fixture before starting (dev) |
+| `kirocrew gateway --seed-replace` | Wipe a non-empty target home and re-seed it (paired with `--seed`) |
+| `kirocrew gateway --no-tunnel` | Never publish a tunnel for this process's whole life, whatever `tunnel.enabled` says. Scoped to TUNNELS: it does not change where the dashboard binds |
+| `kirocrew gateway --json-ready` | Print one `KIROCREW_READY:{...}` line (port, token, pid, KIROCREW_HOME) once the dashboard is bound |
 | `kirocrew gateway --test-mode` | Alias for `--port auto --no-open --json-ready --approval reads` |
 | `kirocrew stop` | Stop a running gateway |
 | `kirocrew stop --port 9999` | Stop gateway on specific port |
 | `kirocrew restart` | Restart gateway (service-aware) |
 | `kirocrew status` | Show runtime stats (uptime, sessions, crons, lessons) |
+
+The token in a `--json-ready` line grants dashboard access for up to 20 hours, so
+captured stdout from a test harness is a credential: keep it out of logs and
+transcripts.
 
 ## Service Management
 
@@ -51,7 +72,7 @@ triggers: help, commands, setup, gateway, how to, what can you do, getting start
 
 ## Pods (Isolated Worktree Test Instances)
 
-Ephemeral, full-stack KiroCrew gateways — one per feature worktree — that run on
+Ephemeral, full-stack Kiro Crew gateways — one per feature worktree — that run on
 their own port + isolated `KIROCREW_HOME` and never touch the live `:5476`
 gateway or shared data. Linux `systemd --user` only. `<wt>` is a worktree name
 (resolved by directory basename or `feat/<name>` branch convention).
@@ -69,7 +90,11 @@ gateway or shared data. Linux `systemd --user` only. `<wt>` is a worktree name
 | `kirocrew pod url <wt>` | Print the pod's base URL |
 | `kirocrew pod logs <wt> -n N` | Tail the pod's journal |
 | `kirocrew pod down <wt>` | Evict the pod and delete its isolated HOME |
+| `kirocrew pod prune` | Bulk-reclaim orphaned pod HOMEs (`--older-than 3d` by default, `--all`, `--dry-run`, `--json`) |
+| `kirocrew pod scenarios` | List the seed scenarios `pod up --seed <scenario>` accepts (`--json`) |
 | `kirocrew pod exec <wt> -- <args>` | Run a kirocrew command against a pod, using the pod's own binary and data |
+| `kirocrew pod api <wt> <METHOD> <path>` | Call a running pod's HTTP API with its own token; prints `{name, method, path, status, ok, body}` |
+| `kirocrew pod api <wt> POST config --data '{…}' --allow-write` | GET and HEAD are permitted by default; every other method needs `--allow-write` |
 
 **Platform:** Linux only. On macOS/Windows every systemd-touching verb refuses
 with a one-line message pointing at `./dev-backend.sh` — it does not crash, and
@@ -78,7 +103,7 @@ with a one-line message pointing at `./dev-backend.sh` — it does not crash, an
 Port derivation: `base + (cksum(name) % 199) + 1` (base `7810` → `7811..8009`).
 Override with `PORT=` in `~/.kiro/crew/pods/<name>.env`.
 
-See `src/kiro_crew/pod/README.md` for the full reference.
+`kirocrew pod --help` lists every verb and its flags.
 
 ## Dashboard Access
 
@@ -98,12 +123,19 @@ See `src/kiro_crew/pod/README.md` for the full reference.
 | `kirocrew chat -m "message"` | Single message (non-interactive) |
 | `kirocrew chat --model claude-opus` | Use specific model |
 
-## Browsing (`playwright-cli`)
+## Browsing (`browser` MCP tool, then `playwright-cli`)
 
-Browsing is not a `kirocrew` subcommand and not an MCP tool. You drive a browser by
-running `playwright-cli` shell commands. It is available when the binary is on
-`PATH`. **Settings → Browser** installs it with one click (and holds the optional
-attach token); the equivalent by hand is `npm install -g @playwright/cli@latest`
+Browsing is not a `kirocrew` subcommand. The primary path is the **`browser` MCP
+tool**, which drives the dashboard's built-in Browser panel in-process
+(`op=navigate|snapshot|click|type|press_key|hover|select_option|screenshot|wait_for|back|console`).
+It refuses a loopback, private, or link-local target, and it needs a native panel
+serving the session.
+
+`playwright-cli` is the fallback: no native panel (a remote gateway, or a
+plain-browser dashboard), an attached logged-in browser, saved storage state, and
+the full operate verb set. It is available when the binary is on `PATH`.
+**Settings → Browser** installs it with one click (and holds the optional attach
+token); the equivalent by hand is `npm install -g @playwright/cli@latest`
 (Node.js 20 or newer).
 
 | Command | Description |
@@ -213,6 +245,8 @@ writes.
 | `kirocrew cron remove JOB_ID` | Remove a cron job |
 | `kirocrew cron pause JOB_ID` | Pause a cron job |
 | `kirocrew cron resume JOB_ID` | Resume a paused job |
+| `kirocrew cron adopt JOB_ID --session-of SESSION` | Give the job an owning chat session, so that session manages it and receives its results |
+| `kirocrew cron adopt JOB_ID --release` | Clear the owning session, returning the job to CLI/dashboard-only management |
 | `kirocrew cron trigger JOB_ID` | Trigger a job immediately |
 | `kirocrew cron preview SCRIPT` | Run a script cron locally with real MCP tools; notifications are printed, not delivered |
 | `kirocrew cron preview SCRIPT -m "msg" -e K=V` | Preview with an input message / extra env vars |
@@ -234,6 +268,7 @@ writes.
 | `kirocrew memory export -o file.json` | Export to file |
 | `kirocrew memory import file.json` | Import memory from JSON |
 | `kirocrew memory migrate` | Migrate legacy markdown memory to vector store |
+| `kirocrew memory show [preferences\|projects\|history]` | Show the markdown memory layer (default: all three; `--format md\|json`, `--since YYYY-MM-DD` for history) |
 | `kirocrew knowledge dedup` | Preview cross-source duplicate knowledge documents (dry-run) |
 | `kirocrew knowledge dedup --apply` | Actually collapse the duplicates |
 | `kirocrew consolidate` | List sessions with unconsolidated messages |
@@ -263,11 +298,12 @@ LLM-generated UI components (widgets, HTML, markdown, SVG, JSON, text).
 
 | Command | Description |
 |---------|-------------|
-| `kirocrew agent list` | List KiroCrew agents |
+| `kirocrew agent list` | List Kiro Crew agents |
 | `kirocrew agent create --name NAME` | Create a new agent |
 | `kirocrew agent create --name NAME --kiro-agent kirocrew --workspace default` | Full options |
 | `kirocrew agent update NAME --kiro-agent new-agent` | Update agent settings |
 | `kirocrew agent delete NAME` | Delete an agent |
+| `kirocrew agent reset-model [--agent kirocrew]` | Clear a pinned model so the agent tracks the shipped default |
 | `kirocrew workspace list` | List workspaces |
 | `kirocrew workspace create --name NAME --dir DIRNAME` | Create workspace (`--dir` is a **name under the data home**, not an absolute path) |
 | `kirocrew workspace create --name NAME --copy-from existing` | Copy from existing |
@@ -302,6 +338,7 @@ keystone paths are still refused). The CLI is the stricter of the two.
 | `kirocrew app init NAME --backend --ui --cron` | Scaffold with backend, UI, and sample cron |
 | `kirocrew app dev NAME` | Toggle an app into dev mode (no-store UI serving + live reload on file change) |
 | `kirocrew app dev NAME --off` | Leave dev mode |
+| `kirocrew app mcp NAME` | Run an app's MCP server on stdio (spawned by kiro-cli, not for humans) |
 
 ## Configuration
 
@@ -312,6 +349,9 @@ keystone paths are still refused). The CLI is the stricter of the two.
 | `kirocrew config set dashboard.url http://localhost:5476` | Set a config value (port is the KIROCREW_PORT env var, not a config key) |
 | `kirocrew config set --file config.json` | Load full config from JSON file |
 | `kirocrew config edit` | Open config in $EDITOR |
+| `kirocrew config defaults [KEYS…]` | Review stored values that still hold a superseded default |
+| `kirocrew config defaults [KEYS…] --adopt` | Remove those stored keys so the current defaults apply |
+| `kirocrew config defaults [KEYS…] --keep` | Record the stored values as intentional and stop reporting them |
 
 ## Profiling (debug-only)
 
@@ -339,6 +379,11 @@ already-running app record -- restart it.
 
 | Command | Description |
 |---------|-------------|
+| `kirocrew secrets import` | Dry-run the migration of plaintext `.env` credentials into the encrypted vault |
+| `kirocrew secrets import --apply` | Store the secrets and rewrite `.env` to `secret://` refs |
+| `kirocrew telemetry status` | Show exactly what the anonymous beacon sends, and whether it will |
+| `kirocrew telemetry disable` | Turn the anonymous beacon off permanently |
+| `kirocrew telemetry enable` | Turn the anonymous beacon back on |
 | `kirocrew security audit` | Scan conversation history for suspicious tool usage |
 | `kirocrew security deny-list` | Show active deny patterns |
 | `kirocrew security events` | Show recent security event log entries (last 20) |
@@ -348,26 +393,35 @@ already-running app record -- restart it.
 | `kirocrew eval memory_recall_basic` | Run specific scenario by name |
 | `kirocrew eval --all` | Run all scenarios (slow) |
 | `kirocrew eval --judge` | Enable LLM judge scoring |
+| `kirocrew bench list` | Show the available corpora and what is cached |
+| `kirocrew bench fetch CORPUS` | Download a corpus into the local cache and verify its checksum |
+| `kirocrew bench retrieval` | Measure retrieval recall/nDCG against a corpus (deterministic) |
+| `kirocrew bench kb-retrieval` | Measure Knowledge Library recall/MRR/nDCG against a golden set (deterministic) |
+| `kirocrew bench compare A B` | Diff two saved JSON reports; refuses to attribute a delta when the runs disagree on corpus |
 
-## Governance Policy (read-only)
+## Governance Policy
 
 Inspects the two-level security model (`effective = POLICY ∩ PROFILE`,
-tightest-wins). All four verbs are read-only — the enterprise ceiling is never
-edited through the CLI (its files are keystone-fenced so the agent cannot read or
-write them).
+tightest-wins). Six verbs: five are read-only, and `fetch` writes — it applies the
+central policy when the download is usable. The enterprise ceiling is never
+hand-edited through the CLI (its files are keystone-fenced so the agent cannot read
+or write them).
 
 | Command | Description |
 |---------|-------------|
 | `kirocrew policy show` | Show the effective enterprise security policy |
+| `kirocrew policy show --ids` | List each denied-command category's rule ids (default: counts only) |
 | `kirocrew policy validate` | Load-check the policy + all profiles |
 | `kirocrew policy explain SCOPE ITEM` | Explain one tool/scope decision for a surface |
 | `kirocrew policy explain SCOPE ITEM --session-key K --agent A --app APP` | Scope the explanation to a surface |
 | `kirocrew policy profile NAME` | Show a profile by name |
+| `kirocrew policy source` | Show whether this host fetches its policy from a central source |
+| `kirocrew policy fetch` | Fetch the central policy now and apply it if usable (`--force` re-downloads, ignoring cached validators) |
 
 ## Cloud (Bring-Your-Own AWS)
 
-Runs KiroCrew on an EC2 instance in **your own** AWS account; credentials are
-resolved by the `aws` CLI and never stored by KiroCrew. All verbs accept
+Runs Kiro Crew on an EC2 instance in **your own** AWS account; credentials are
+resolved by the `aws` CLI and never stored by Kiro Crew. All verbs accept
 `--profile` / `--region`; the single-instance verbs also accept `--tag`
 (defaults to the last launched instance).
 
@@ -378,12 +432,13 @@ resolved by the `aws` CLI and never stored by KiroCrew. All verbs accept
 | `kirocrew cloud launch --size TIER -y` | Non-interactive launch at a size tier |
 | `kirocrew cloud launch --new` | Create a separate new instance instead of resuming the saved one |
 | `kirocrew cloud launch --keep-on-failure` | On bootstrap failure keep the instance for inspection |
-| `kirocrew cloud list` | List your KiroCrew cloud instances |
+| `kirocrew cloud list` | List your Kiro Crew cloud instances |
 | `kirocrew cloud status` | Show one instance's state |
 | `kirocrew cloud connect` | Open the dashboard over an SSM tunnel |
 | `kirocrew cloud tunnel` | Open the dashboard SSM tunnel (standalone alias of connect) |
 | `kirocrew cloud connect --local-port N --no-browser` | Forward to a specific local port, no browser |
 | `kirocrew cloud login` | Sign kiro-cli in on the instance (fixes "not logged in" chat errors) |
+| `kirocrew cloud logout` | Sign kiro-cli out on the instance, to switch Kiro account |
 | `kirocrew cloud stop` | Stop the instance (pause billing) |
 | `kirocrew cloud start` | Start a stopped instance |
 | `kirocrew cloud destroy` | Remove the instance and ALL its AWS resources |
@@ -391,10 +446,34 @@ resolved by the `aws` CLI and never stored by KiroCrew. All verbs accept
 | `kirocrew cloud iam-policy` | Print the least-privilege IAM policy to apply |
 | `kirocrew cloud iam-boundary` | Pre-create the immutable permissions boundary (admin, one-time) |
 
+## Tailnet (Tailscale)
+
+Publishes this dashboard on your tailnet and trusts its origin, so a device on the
+tailnet reaches it without a public tunnel.
+
+| Command | Description |
+|---------|-------------|
+| `kirocrew tailnet status` | Show whether the dashboard is published and trusted on your tailnet |
+| `kirocrew tailnet up` | Publish the dashboard on your tailnet and trust its origin |
+| `kirocrew tailnet down` | Stop publishing the dashboard on your tailnet |
+| `... --port N` | Name the dashboard port; `up` needs it whenever discovery has no verified port |
+
+`up` publishes only a port it has evidence for: an explicit `--port`, `KIROCREW_PORT`,
+or the running gateway's run marker. With none of those — the gateway is down, the
+marker is unreadable, or several gateways are up, where the marker deliberately
+refuses — `up` refuses rather than falling back to the configured `dashboard.url`
+port, because nothing is verified to answer there and `tailscale serve` would expose
+whatever does. Start the gateway and re-run, or name the port yourself. `status` and
+`down` do accept the configured port: one only reports, and the other checks mount
+ownership before removing anything.
+
 ## Computer Use (Desktop Automation)
 
 Default-OFF behind a keystone enable (`~/.kiro/crew/computer_use.json`, **not**
-`config.json`). macOS only. These are human debug/diagnostic twins of the
+`config.json`). macOS and Windows carry the full tool set; Linux answers a typed
+unsupported refusal. On Windows there is no per-process input, so a keystroke takes
+the user's keyboard focus and a coordinate click moves their real cursor — say so
+rather than reporting a silent success. These are human debug/diagnostic twins of the
 `computer_*` MCP tools — the agent uses the MCP tools, not these.
 
 | Command | Description |
@@ -409,7 +488,7 @@ Default-OFF behind a keystone enable (`~/.kiro/crew/computer_use.json`, **not**
 
 | Command | Description |
 |---------|-------------|
-| `kirocrew snapshot` | Create a portable backup of KiroCrew state |
+| `kirocrew snapshot` | Create a portable backup of Kiro Crew state |
 | `kirocrew snapshot /path/to/dir` | Snapshot to specific output directory |
 | `kirocrew snapshot --keep 7` | Keep N most recent snapshots (default: 7) |
 | `kirocrew snapshot --list` | List existing snapshots |
