@@ -1202,6 +1202,10 @@ def _marker_bearing_text(payload: dict[str, Any], _max_nodes: int = 512) -> str 
 
 
 ELIDED_MARKER_VALUE = "[[directive marker emitted on its own line above]]"
+# Substituted for a single field whose own nesting ``json.dumps`` cannot encode.
+# Per FIELD, so one unserialisable value costs only itself: every sibling the
+# encoder can hold still reaches the transcript.
+UNSERIALISABLE_FIELD_VALUE = "[[field nested too deeply for this transport to encode]]"
 
 
 def _elide_marker_value(payload: Any, marker: str) -> Any:
@@ -1214,14 +1218,108 @@ def _elide_marker_value(payload: Any, marker: str) -> Any:
     the marker goes out verbatim and this copy carries everything ELSE, with the
     one value that already went out replaced by a short note instead of
     duplicated.
+
+    ITERATIVE, over an explicit heap stack, and that is a correctness property
+    rather than a style choice. Recursing here had no depth bound, and the
+    ``RecursionError`` that raises is a ``RuntimeError`` that neither the
+    ``(ValueError, TypeError)`` guard on ``json.loads`` in
+    :func:`_repair_escaped_marker` nor any caller catches -- so a marker sitting
+    beside a deeply nested sibling branch escaped
+    :func:`_build_tool_result_event` and ``parse_session_update`` and aborted the
+    whole turn. The depth comes out of a tool's own output, and backends own the
+    envelope shape, so nothing upstream bounds it.
+
+    A depth CEILING was the obvious repair and the wrong one: every caller then
+    has to answer "too deep" with something, and each available answer drops data
+    the frame really carries -- the directive, or the sibling fields this function
+    exists to preserve. Walking on the heap removes the question, because
+    Python's limit is on frames and not on data: there is no depth this cannot
+    copy, no ceiling constant to keep in agreement, and no refusal branch to get
+    wrong. Nothing needs bounding away either, since ``json.loads`` had already
+    materialised the whole structure before it reached here.
     """
-    if isinstance(payload, str):
+    if not isinstance(payload, (dict, list)):
         return ELIDED_MARKER_VALUE if payload == marker else payload
-    if isinstance(payload, dict):
-        return {k: _elide_marker_value(v, marker) for k, v in payload.items()}
-    if isinstance(payload, list):
-        return [_elide_marker_value(v, marker) for v in payload]
-    return payload
+
+    def _shell(node: Any) -> Any:
+        return {} if isinstance(node, dict) else []
+
+    root = _shell(payload)
+    # Each entry pairs a source container with the copy being filled for it. A
+    # container is attached to its parent BEFORE its own contents are walked, so
+    # the parent never waits on the child and depth costs heap, not frames.
+    pending: list[tuple[Any, Any]] = [(payload, root)]
+    while pending:
+        source, target = pending.pop()
+        items = source.items() if isinstance(source, dict) else enumerate(source)
+        for key, value in items:
+            if isinstance(value, (dict, list)):
+                copied = _shell(value)
+                pending.append((value, copied))
+            else:
+                copied = ELIDED_MARKER_VALUE if value == marker else value
+            if isinstance(target, dict):
+                target[key] = copied
+            else:
+                target.append(copied)
+    return root
+
+
+def _dumped_siblings(payload: Any, marker: str) -> str | None:
+    """Serialise the sibling copy of *payload*, keeping every field JSON can hold.
+
+    De-recursing the walk above is only half the trip: every caller SERIALISES
+    the result, and ``json.dumps`` recurses in C against the process stack rather
+    than ``sys.recursionlimit``. That ceiling is lower than the decoder's -- and
+    lower again on Windows -- so a structure this process successfully RECEIVED
+    can be one it cannot re-emit, and a 4000-deep branch that encodes on Linux
+    overflows on Windows.
+
+    Degrades PER FIELD rather than per frame. A whole-frame answer forces a choice
+    between two losses that are not comparable: dropping the directive silently
+    unarms a monitor loop (the model is told the request was made and no loop
+    exists), while dropping sibling fields costs transcript detail a reader can
+    see is missing. Salvaging field by field refuses that trade -- the directive
+    always survives, and so does every sibling the encoder can actually hold,
+    with only the offending value replaced by
+    :data:`UNSERIALISABLE_FIELD_VALUE`.
+
+    ``None`` means "there is no sibling text to emit", never "drop the frame":
+    the caller keeps the directive either way.
+    """
+    copied = _elide_marker_value(payload, marker)
+    try:
+        return json.dumps(copied, default=str)
+    except RecursionError:
+        pass
+    # Second pass: encode each top-level entry on its own, so one unserialisable
+    # value costs only itself. The marker's own entry was already replaced by a
+    # short note above, so it can never be the one that fails.
+    if isinstance(copied, dict):
+        salvaged: Any = {key: _encodable(value) for key, value in copied.items()}
+    elif isinstance(copied, list):
+        salvaged = [_encodable(value) for value in copied]
+    else:  # pragma: no cover - a scalar cannot overflow the encoder
+        return None
+    try:
+        return json.dumps(salvaged, default=str)
+    except RecursionError:
+        # Fail safe rather than raise: the caller still emits the directive.
+        logger.warning(
+            "tool-result envelope carries a session-directive marker but its "
+            "sibling fields could not be serialised even one at a time, so they "
+            "are omitted; the marker itself is delivered unchanged."
+        )
+        return None
+
+
+def _encodable(value: Any) -> Any:
+    """*value* if ``json.dumps`` can encode it, else a short placeholder."""
+    try:
+        json.dumps(value, default=str)
+    except RecursionError:
+        return UNSERIALISABLE_FIELD_VALUE
+    return value
 
 
 def _repair_escaped_marker(text: str) -> str | None:
@@ -1264,7 +1362,11 @@ def _repair_escaped_marker(text: str) -> str | None:
     # (1) the entire text is a JSON dump.
     try:
         outer = json.loads(text)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, RecursionError):
+        # RecursionError too: the C scanner enforces its own nesting ceiling and
+        # raises there, and an uncaught one aborts the turn instead of leaving the
+        # frame unrepaired. Deep nesting is a reason to refuse this recovery, not
+        # to kill the session.
         outer = None
     if isinstance(outer, str):
         if session_directive.peek(outer) is not None:
@@ -1276,8 +1378,12 @@ def _repair_escaped_marker(text: str) -> str | None:
             # only this one survives display: session_directive.strip_marker cuts
             # from the sentinel to the END of the string, so anything after the
             # marker is dropped from the transcript the user actually reads.
-            siblings = json.dumps(_elide_marker_value(outer, inner), default=str)
-            return siblings + "\n" + inner
+            siblings = _dumped_siblings(outer, inner)
+            # ``inner`` is already proven readable here, so sibling text that
+            # cannot be produced at all must cost the siblings and never the
+            # directive: returning None would hand the caller back the unreadable
+            # escaped text and leave the gateway-parked record unclaimed.
+            return inner if siblings is None else siblings + "\n" + inner
 
     # (2) The escaped dump is only PART of the text -- another output part, or a
     # line of prose, sits beside it -- so (1) cannot parse the whole thing. Undo
@@ -1631,9 +1737,9 @@ def _build_tool_result_event(update: dict[str, Any], cache_scope: str = "") -> A
                                     # They go BEFORE the marker: strip_marker cuts
                                     # from the sentinel to the end of the string,
                                     # so anything after it is lost from display.
-                                    output_parts.append(
-                                        json.dumps(_elide_marker_value(j, _mcp_text), default=str)
-                                    )
+                                    _siblings = _dumped_siblings(j, _mcp_text)
+                                    if _siblings is not None:
+                                        output_parts.append(_siblings)
                                 output_parts.append(_mcp_text)
                             else:
                                 output_parts.append(json.dumps(j, default=str))

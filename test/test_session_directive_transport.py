@@ -31,8 +31,13 @@ import types
 from source_corpus import parsed_candidates, src_root
 
 from kiro_crew import session_directive as sd
+from kiro_crew.acp import _dispatch as _dispatch_module
 from kiro_crew.acp._dispatch import (
+    ELIDED_MARKER_VALUE,
+    UNSERIALISABLE_FIELD_VALUE,
     _build_tool_result_event,
+    _dumped_siblings,
+    _elide_marker_value,
     _mcp_content_text,
     _repair_escaped_marker,
     parse_session_update,
@@ -355,6 +360,172 @@ class TestSurvivesPreSerialisedResultText:
     def test_plain_text_output_is_untouched(self):
         out = _runtime_output(_update(content=[{"content": {"type": "text", "text": "ok"}}]))
         assert out == "ok"
+
+
+# Past any recursive walk's reach: CPython's frame limit is ~1000, so a recursive
+# elision blows the stack here while an iterative one does not notice.
+_OVERFLOW_DEPTH = 4000
+# A depth every platform can serialise, for the fidelity assertions.
+_ENCODABLE_DEPTH = 40
+
+
+def _nest(depth: int) -> object:
+    node: object = "leaf"
+    for _ in range(depth):
+        node = {"wrap": node}
+    return node
+
+
+def _deep_sibling(marker: str, depth: int) -> dict[str, object]:
+    """The reachable shape: the marker SHALLOW, beside a deep sibling branch.
+
+    ``_marker_bearing_text`` only looks down to depth 6, so a marker buried
+    deeper is never located and the walk is never reached. What DOES reach it is a
+    marker the walk finds immediately, next to a branch of arbitrary depth --
+    because the elision then copies the whole payload.
+
+    ONE marker field: a frame carrying the same text twice is refused earlier for
+    a different reason entirely (the ambiguity gate), which would mask the depth
+    behaviour under test here.
+    """
+    return {"response": marker, "note": CANARY, "deep": _nest(depth)}
+
+
+def _dumps_overflows(monkeypatch, *, only_deep: bool = False) -> None:
+    """Force ``json.dumps`` inside the parser to raise ``RecursionError``.
+
+    The encoder's ceiling is a C-STACK limit, not ``sys.recursionlimit``, so it
+    differs per platform: a 4000-deep branch encodes fine on Linux and overflows
+    on Windows, which is where CI caught it. A test that merely nests deeply
+    therefore passes for the wrong reason on the machine most people run it on.
+    Raising the error directly tests OUR branches instead of CPython's stack size.
+
+    With ``only_deep`` the failure is selective -- only a value that actually
+    contains the deep chain raises -- which is what lets the per-field salvage be
+    observed rather than assumed.
+    """
+    real = _dispatch_module.json.dumps
+
+    def _boom(obj=None, **kwargs):
+        if not only_deep or _contains_wrap(obj):
+            raise RecursionError("maximum recursion depth exceeded while encoding a JSON object")
+        return real(obj, **kwargs)
+
+    def _contains_wrap(obj, _depth=0):
+        if _depth > 8:
+            return True
+        if isinstance(obj, dict):
+            return "wrap" in obj or any(_contains_wrap(v, _depth + 1) for v in obj.values())
+        if isinstance(obj, list):
+            return any(_contains_wrap(v, _depth + 1) for v in obj)
+        return False
+
+    monkeypatch.setattr(_dispatch_module.json, "dumps", _boom)
+
+
+class TestDeepEnvelopeCannotAbortTheTurn:
+    """A deeply nested tool-result envelope must not take the turn down.
+
+    Two limits sit on this path and BOTH were live. ``_elide_marker_value``
+    recursed with no bound, and the ``RecursionError`` that raises is a
+    ``RuntimeError`` that neither the ``(ValueError, TypeError)`` guard on
+    ``json.loads`` nor any caller catches -- so it escaped
+    ``_build_tool_result_event`` and ``parse_session_update``. Behind it,
+    ``json.dumps`` recurses in C against the process stack, a lower ceiling than
+    the decoder's and lower again on Windows, so a frame this process received
+    could be one it could not re-emit.
+
+    A tool's own output reaches both, and backends own the envelope shape, so the
+    depth is chosen by whatever produced the frame.
+    """
+
+    def test_the_walk_survives_depth_no_recursion_could_take(self):
+        deep = {"response": "x", "deep": _nest(_OVERFLOW_DEPTH)}
+        out = _elide_marker_value(deep, "x")
+        assert out["response"] == ELIDED_MARKER_VALUE
+        node = out["deep"]
+        for _ in range(_OVERFLOW_DEPTH):
+            node = node["wrap"]
+        assert node == "leaf", "the whole branch was copied, not truncated"
+
+    def test_a_shallow_envelope_is_still_elided(self):
+        marker = _monitor()
+        out = _elide_marker_value({"a": marker, "b": CANARY}, marker)
+        assert out == {"a": ELIDED_MARKER_VALUE, "b": CANARY}
+
+    def test_list_order_survives_the_iterative_walk(self):
+        # An explicit stack is easy to get wrong for lists, and order is
+        # observable in the transcript.
+        marker = _monitor()
+        out = _elide_marker_value({"items": ["a", marker, "b", ["c", "d"]]}, marker)
+        assert out == {"items": ["a", ELIDED_MARKER_VALUE, "b", ["c", "d"]]}
+
+    def test_an_unencodable_field_costs_only_itself(self, monkeypatch):
+        # The point of degrading per FIELD: the deep value is replaced, and every
+        # sibling the encoder can hold still reaches the transcript.
+        marker = _monitor()
+        payload = {"out": marker, "exit_status": 7, "note": CANARY, "deep": _nest(_OVERFLOW_DEPTH)}
+        _dumps_overflows(monkeypatch, only_deep=True)
+        dumped = _dumped_siblings(payload, marker)
+        assert dumped is not None
+        restored = json.loads(dumped)
+        assert restored["exit_status"] == 7, "an encodable sibling survived"
+        assert restored["note"] == CANARY, "an encodable sibling survived"
+        assert restored["out"] == ELIDED_MARKER_VALUE, "the marker is still elided"
+        assert restored["deep"] == UNSERIALISABLE_FIELD_VALUE, "only the deep field was replaced"
+
+    def test_wholly_unencodable_siblings_return_none_rather_than_raise(self, monkeypatch):
+        marker = _monitor()
+        _dumps_overflows(monkeypatch)
+        assert _dumped_siblings({"out": marker, "note": CANARY}, marker) is None
+
+    def test_recovery_keeps_the_directive_and_the_encodable_siblings(self, monkeypatch):
+        # Recovery (1) end to end: the directive stays readable and the shallow
+        # sibling output is not collateral damage.
+        marker = _monitor()
+        frame = json.dumps(_deep_sibling(marker, _OVERFLOW_DEPTH))
+        _dumps_overflows(monkeypatch, only_deep=True)
+        repaired = _repair_escaped_marker(frame)
+        assert repaired is not None
+        assert sd.peek(repaired) == ("monitor_start", MONITOR_ARGS)
+        assert CANARY in repaired, "the encodable sibling survived"
+
+    def test_recovery_keeps_the_directive_when_no_siblings_can_be_emitted(self, monkeypatch):
+        # The directive is a control token whose loss silently unarms a loop, so
+        # it outranks every sibling field.
+        marker = _monitor()
+        frame = json.dumps({"response": marker, "note": CANARY})
+        _dumps_overflows(monkeypatch)
+        repaired = _repair_escaped_marker(frame)
+        assert repaired is not None, "the directive must not be thrown away"
+        assert sd.peek(repaired) == ("monitor_start", MONITOR_ARGS)
+
+    def test_a_nested_frame_keeps_both_the_directive_and_its_siblings(self):
+        # Unpatched, at a depth every platform serialises: nothing is degraded.
+        frame = json.dumps(_deep_sibling(_monitor(), _ENCODABLE_DEPTH))
+        repaired = _repair_escaped_marker(frame)
+        assert repaired is not None
+        assert sd.peek(repaired) == ("monitor_start", MONITOR_ARGS)
+        assert '"leaf"' in repaired, "the sibling branch survived whole"
+
+    def test_the_runtime_parser_still_yields_an_event(self, monkeypatch):
+        # Dropping the event would lose meta["output"] and meta["done"] for the
+        # tool pill; letting json.dumps raise would abort the turn outright.
+        marker = _monitor()
+        update = _update(rawOutput={"items": [{"Json": _deep_sibling(marker, _OVERFLOW_DEPTH)}]})
+        # only_deep: the builder serialises other things on this path too, and
+        # breaking those would prove nothing about the sibling salvage.
+        _dumps_overflows(monkeypatch, only_deep=True)
+        out = _runtime_output(update)
+        assert out is not None, "the turn survived"
+        assert sd.peek(out) == ("monitor_start", MONITOR_ARGS), "the directive still arrives"
+
+    def test_unparseably_deep_text_does_not_escape_the_repair(self):
+        # json.loads' own C ceiling raises RecursionError on text this deep; the
+        # repair must treat that as "recovery (1) is unusable" and carry on.
+        # Whether recovery (2) then succeeds is not the property under test.
+        frame = "[" * 20000 + json.dumps(_monitor()) + "]" * 20000
+        _repair_escaped_marker(frame)
 
 
 class TestSurvivesTheAcpClientParser:
