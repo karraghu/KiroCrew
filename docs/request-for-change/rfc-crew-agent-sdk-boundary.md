@@ -1,11 +1,11 @@
 ---
 title: Crew Agent SDK Boundary — isolate the codebase from ACP, and name the host contract
-status: draft
+status: partial
 revision: v3
 author: zejiangg, with Kiro
 created: 2026-08-28
-last-audited: 2026-08-28
-audited-at: dc88f142b
+last-audited: 2026-09-05
+audited-at: 424efa423
 doc-pr:
 implementation-prs: []
 tracking-issues: []

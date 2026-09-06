@@ -9,7 +9,7 @@ The `prepare-pr` skill
 side of this: it drives a working tree to review-ready by working with these
 gates. Its phase flow, exit-code contract and PR-description contract live in
 that skill, not here. Its portability design is
-[prepare-pr-portability.md](prepare-pr-portability.md). The human release process
+[../request-for-change/rfc-prepare-pr-portability.md](../request-for-change/rfc-prepare-pr-portability.md). The human release process
 is [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 ## Shape

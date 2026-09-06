@@ -1,5 +1,10 @@
 # AgentCore Identity and Gateway Implementation Plan
 
+> **Live plan.** 11 of 30 steps are done: `platform/agentcore_schema.py` ships and
+> `AgentIdentityProvider` is real across `platform/interfaces.py`, `context.py`,
+> `defaults.py` and `bootstrap.py`. Its spec is
+> [`../rfc-agentcore-identity-gateway.md`](../rfc-agentcore-identity-gateway.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > superpowers:subagent-driven-development (recommended) or
 > superpowers:executing-plans to implement this plan task-by-task. Steps use
@@ -39,7 +44,7 @@ rewriter, governance `SCOPE_CATALOG`, pytest-asyncio. Companion-only:
 `boto3` / `bedrock-agentcore` (not a public-wheel dependency).
 
 **Spec:**
-[`../../request-for-change/rfc-agentcore-identity-gateway.md`](../../request-for-change/rfc-agentcore-identity-gateway.md)
+[`../rfc-agentcore-identity-gateway.md`](../rfc-agentcore-identity-gateway.md)
 
 ## Global Constraints
 
@@ -139,9 +144,9 @@ return `None` / `{}` / the input principal unchanged.
 **Files:**
 
 - Create: `docs/request-for-change/rfc-agentcore-identity-gateway.md`
-- Create: `docs/superpowers/plans/2026-08-27-agentcore-identity-gateway.md`
+- Create: `docs/request-for-change/plans/2026-08-27-agentcore-identity-gateway.md`
 - Modify: `docs/request-for-change/README.md`
-- Modify: `docs/superpowers/plans/README.md`
+- Modify: `docs/request-for-change/plans/README.md`
 
 **Interfaces:**
 
@@ -155,7 +160,7 @@ return `None` / `{}` / the input principal unchanged.
 
   Add a `draft` row to `docs/request-for-change/README.md` naming the
   commit they were verified against (`152c00e99`). Link this plan from
-  `docs/superpowers/plans/README.md`.
+  `docs/request-for-change/plans/README.md`.
 
 - [x] **Step 3: Verify documentation.**
 

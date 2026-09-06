@@ -1,8 +1,31 @@
-# Migration: Playwright MCP + Kiro Crew proxy to Playwright CLI
+---
+title: Playwright CLI Migration — retire the Playwright MCP proxy for playwright-cli
+status: partial
+author: Bolin Chen
+created: 2026-08-13
+last-audited: 2026-09-05
+audited-at: 424efa423
+doc-pr:
+implementation-prs: []
+tracking-issues: []
+supersedes: []
+superseded-by: []
+---
 
-Status: proposed. Replaces the browser stack wholesale rather than adding a
-second path, because two browser backends would double the surface that already
-produces the defects this migration retires.
+# RFC: Migration — Playwright MCP + Kiro Crew proxy to Playwright CLI
+
+This migration replaces the browser stack wholesale rather than adding a second
+path, because two browser backends would double the surface that already produces
+the defects it retires.
+
+> **Partly shipped — current behaviour is
+> [`../system-specs/modules/browser.md`](../system-specs/modules/browser.md).**
+> `playwright-cli` is the live browser backend and `browser_cli/` is on main. One
+> deliberate divergence from the plan below: Phase 3's removal of `browser/` did
+> **not** happen — `browser/command_bus.py` and `browser/__init__.py` remain,
+> `dashboard/handlers/messaging.py` imports the command bus, and
+> `test_browser_command_bus.py` pins it. Read the deletion table as a proposal that
+> was not carried out, not as a record of what shipped.
 
 ## Why
 

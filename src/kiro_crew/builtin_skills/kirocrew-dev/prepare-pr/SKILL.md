@@ -192,7 +192,7 @@ on forks via the Stage-2 `fork-*-review.yml` lanes, posting under the same check
 names. CodeQL is the one lane a fork head cannot run — a non-blocking "Not eligible"
 note, not a blocker.
 
-Full design + `.prepare-pr.toml` schema: `docs/ci/prepare-pr-portability.md`.
+Full design + `.prepare-pr.toml` schema: `docs/request-for-change/rfc-prepare-pr-portability.md`.
 
 ## The loop
 

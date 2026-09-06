@@ -1,9 +1,27 @@
-# Design: Portable `prepare-pr` via Pluggable Project Profiles
+---
+title: Portable `prepare-pr` via pluggable project profiles
+status: implemented
+author: Bolin Chen
+created: 2026-07-28
+last-audited: 2026-09-05
+audited-at: 424efa423
+doc-pr:
+implementation-prs: []
+tracking-issues: []
+supersedes: []
+superseded-by: []
+---
 
-- **Status:** Implemented in PR #662 — resolver + bundled profile + `pr_status.py` readiness override + `SKILL.md` refactor + tests.
-- **Author:** Kiro Crew maintainers (drafted with Kiro)
-- **Date:** 2026-07-28
-- **Related (repo paths; the `docs/` ones are dev-only and not shipped in the wheel):** `docs/ci/ci-and-reviews.md` (current-state source of truth for how CI + `prepare-pr` work today), the `prepare-pr` skill source at `src/kiro_crew/builtin_skills/kirocrew-dev/prepare-pr/`, and the `kirocrew-worktree-dev` skill.
+# RFC: Portable `prepare-pr` via Pluggable Project Profiles
+
+> **Current behaviour: see the `prepare-pr` skill's own
+> [`SKILL.md`](../../src/kiro_crew/builtin_skills/kirocrew-dev/prepare-pr/SKILL.md)
+> and [`../ci/ci-and-reviews.md`](../ci/ci-and-reviews.md).** The profile resolver
+> ships as `resolve_profile.py` in that skill's `scripts/` directory and
+> implements the four-step resolution order and the `.prepare-pr.toml` schema
+> described below, so this document is the decision record. The skill's
+> `references/rationale.md` covers rule rationale rather than architecture and is
+> not superseded by it.
 
 ---
 

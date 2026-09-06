@@ -1,11 +1,11 @@
 ---
 title: Agent Config Mirror — one declared contract for projecting the agent spec onto every backend
-status: draft
+status: partial
 revision: v1
 author: zejiangg, with Kiro
 created: 2026-09-02
-last-audited: 2026-09-02
-audited-at: f51e65947
+last-audited: 2026-09-05
+audited-at: 424efa423
 doc-pr:
 implementation-prs: []
 tracking-issues: []

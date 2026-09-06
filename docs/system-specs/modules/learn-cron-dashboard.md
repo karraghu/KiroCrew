@@ -1266,6 +1266,42 @@ Application posts the card through `DashboardState.post_question_card(slot_key, 
 
 The user's answer arrives as an **ordinary next message** that resumes the session with full context; the frontend submit for an `ask_id`-less card uses the same send-as-a-normal-message path the legacy `AskUserQuestion` tool-call sniff already used (`chatSlice.pendingQuestions` remains keyed by slot). A live `user` or `nudge` row retires the stateless card on both the server and client. Mid-turn steering has a second authoritative retirement point: the dashboard persists the user row when the steer RPC accepts it, but kiro-cli confirms that the running turn actually consumed it later via `steering_consumed`. If the agent posts a question card between those events, the earlier row cannot retire a record that did not exist yet; a positively matched `steering_consumed` event therefore retires the slot's stateless card and broadcasts `question_card_resolved`. Empty or unmatched steer echoes prove no answer was consumed and retire nothing; legacy blocking `ask_id` cards remain owned exclusively by their parked round-trip.
 
+#### Blocking HTTP API
+
+The MCP `ask_question` tool does not call this API: it returns a stateless, non-blocking session directive. `POST /api/ask-question` remains a separate blocking round trip for owner callers and returns only after the card is answered, dismissed, cancelled, or timed out.
+
+All four endpoints call `_deny_app_token` and `_deny_non_owner` before reading their bodies. App tokens receive `403 {"error": "app token not permitted for this endpoint", "code": "app_token_forbidden"}`; non-owners receive a `403` owner-only denial.
+
+##### `POST /api/ask-question`
+
+Request body: `{session_key, questions: [...], timeout_secs?}`. `session_key` must resolve to an existing slot; `questions` uses the same validator as the tool; `timeout_secs`, when supplied, must be an integer and is bounded by the blocking wait.
+
+Success responses are `200 {"status": "answered", "ask_id", "answers"}` or `200 {"status": "timeout", "ask_id"}`. Invalid JSON, a non-object body, a missing `session_key`, invalid questions, a non-integer timeout, or duplicate keys after redaction return `400`; an unknown or unrenderable slot returns `404`.
+
+##### `GET /api/ask-question/pending`
+
+Returns `200` with an array of cards that can be rehydrated after a reload or websocket reconnect. A blocking card has `{ask_id, slot, questions, ts}`; a stateless card has `{card_id, slot, questions, ts}`. Empty or status-only records are omitted.
+
+`ask_id` identifies a parked blocking wait and is answered through the endpoint below. A stateless `card_id` has no blocked caller: its answer is the next ordinary user message, and its status is retired through the dismiss endpoint or that message.
+
+##### `POST /api/ask-question/dismiss`
+
+Request body: `{slot, card_id}`. This endpoint retires only a stateless card's `needs_input` record and returns `200 {"ok": true}`.
+
+Invalid JSON, a non-object body, or missing `slot` or `card_id` returns `400`; an unknown, stale, or blocking card record returns `404`. It cannot dismiss a blocking `ask_id` card.
+
+##### `POST /api/ask-question/{ask_id}/answer`
+
+Request body: `{answers: {question: answer}}`, or `{dismissed: true}` to resolve the blocking wait without an answer. Successful resolution returns `200 {"ok": true}`.
+
+Invalid JSON, a non-object body, missing or empty answers, more than four answers, or overlong question keys or answer values return `400`; an already answered, expired, or unknown `ask_id` returns `404`.
+
+#### Blocking lifecycle
+
+A blocking card is registered under its `ask_id` until its wait exits. Answering, dismissing, timing out, or cancellation retires that record and broadcasts its resolution.
+
+Stopping, interrupting, or deleting a slot unblocks its pending blocking questions. Session reset uses the same unblock path, so a blocking wait cannot outlive the session that issued it.
+
 The agent must end its turn and must not re-ask or guess in the meantime.
 
 **Forgery gate + audit** (shared by every directive tool): the consumer honours the directive ONLY when the tool call was recorded — via kiro-cli's out-of-band `_meta` channel — as an MCP call whose canonical `_meta.kiro.toolName` (with `_meta.kiro.mcpServerName` set) is a known directive tool, never the LLM-authored `title`; native sub-agent tool calls are refused (no independently bindable slot); and every application emits a SEL tool-invocation event tagged `source="mcp-directive"`.

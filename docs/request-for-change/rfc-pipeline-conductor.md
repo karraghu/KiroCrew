@@ -1,4 +1,29 @@
-# Pipeline Conductor: the issue pipelines as a conductor use case
+---
+title: Pipeline Conductor — the issue pipelines as a conductor use case
+status: partial
+author: Raymond Chen
+created: 2026-09-01
+last-audited: 2026-09-05
+audited-at: 424efa423
+doc-pr:
+implementation-prs: []
+tracking-issues: []
+supersedes: []
+superseded-by: []
+---
+
+# RFC: Pipeline Conductor — the issue pipelines as a conductor use case
+
+> **Partly shipped — see the `pipeline-conductor` skill at
+> [`builtin_skills/pipeline-conductor/SKILL.md`](../../src/kiro_crew/builtin_skills/pipeline-conductor/SKILL.md)
+> for what runs today.** M0 is on main: the `kirocrew-pipeline-conductor` agent is
+> registered in `subagent.py`'s `UNADVERTISED_AGENTS`, and the skill ships with its
+> bundled scripts and the `conductor-status/v1` schema. M1's `PipelineSpec` and
+> SQLite event store, M2's adjudication and SLA machinery, and M3's baking,
+> compensation and per-repo objects are unbuilt — `PipelineSpec` has no code hit
+> outside this document — and five decisions below are still open. No
+> `system-specs/modules/` contract owns the conductor; the skill is the only
+> contract for the shipped half.
 
 A dedicated `kirocrew-pipeline-conductor` agent and a `pipeline-conductor` builtin skill that run a
 repository pipeline as a supervised worker fleet. The skill is the operating procedure of record;

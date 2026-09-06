@@ -51,15 +51,12 @@ organized for someone browsing the repository.
 | [weixin-integration.md](weixin-integration.md) | Weixin setup, and the risks to read first. |
 | [whatsapp-integration.md](whatsapp-integration.md) | WhatsApp (QR-linked personal account) setup, and the risks to read first. |
 | [feishu-integration.md](feishu-integration.md) | Feishu (Lark/飞书) setup and behavior. |
-| [messaging-transport.md](messaging-transport.md) | The channel-neutral contracts every transport shares. |
 
 ## Platform
 
 | Doc | Covers |
 |---|---|
-| [app-platform-trust-model.md](app-platform-trust-model.md) | Enabled apps run in-process with full privileges: the trust boundary and its audit. |
 | [mcp-apps.md](mcp-apps.md) | Rendering interactive MCP tool output in chat: the two gates, what a server declares, and the plain-text fallback. |
-| [dashboard-iframe-hosts.md](dashboard-iframe-hosts.md) | The four iframe hosts, their differing sandboxes, and why they are not interchangeable. |
 
 ## Maintaining this directory
 

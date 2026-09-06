@@ -1,5 +1,11 @@
 # Durable Run Coordinator Implementation Plan
 
+> **Dormant plan — do not read the checkboxes as in-flight work.** 0 of 53 steps
+> are done and `RunCoordinator` has zero hits in `src/` and `test/`. Nothing here
+> is on main. Its spec is
+> [`../rfc-durable-run-coordinator.md`](../rfc-durable-run-coordinator.md), which
+> is still live, so the plan is unstarted rather than obsolete.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > superpowers:subagent-driven-development (recommended) or
 > superpowers:executing-plans to implement this plan task-by-task. Steps use
@@ -95,7 +101,7 @@ exceptions.
 
 **Files:**
 
-- Create: `docs/superpowers/plans/2026-08-22-durable-run-coordinator.md`
+- Create: `docs/request-for-change/plans/2026-08-22-durable-run-coordinator.md`
 - Modify: `docs/request-for-change/rfc-durable-run-coordinator.md`
 
 **Interfaces:**

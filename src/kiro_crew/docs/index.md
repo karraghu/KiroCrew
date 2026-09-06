@@ -63,8 +63,8 @@ Besides the dashboard and CLI, Kiro Crew ships channel integrations for
 [Weixin](weixin-integration.md), [iMessage](imessage-integration.md),
 [WhatsApp](whatsapp-integration.md), and
 [Feishu](feishu-integration.md). They
-share one channel-neutral core, described
-in [Messaging Transport](messaging-transport.md).
+all share one channel-neutral core, so a capability a channel lacks degrades
+gracefully rather than failing the turn.
 
 ## Guides
 
@@ -78,8 +78,6 @@ in [Messaging Transport](messaging-transport.md).
 - [MCP Apps](mcp-apps.md): render interactive MCP tool output (diagrams, viewers,
   forms) in chat, the two gates that enable it, what a server must declare, and why
   output stays plain text otherwise
-- [Dashboard iframe hosts](dashboard-iframe-hosts.md): which of the four embed
-  hosts to use, and why their sandboxes differ
 
 ## Security
 
@@ -91,8 +89,9 @@ in [Messaging Transport](messaging-transport.md).
   ([Blocked commands](blocked-commands.md))
 - Prompt-injection credential-exfiltration protection
 - Slack access is owner-only: multi-user access and open channels are refused
-- [App Platform Trust Model](app-platform-trust-model.md): enabled apps run
-  in-process with full privileges; the trust boundary and its audit
+- An enabled app runs in-process with the gateway's own privileges, so enabling one
+  is a trust decision. Third-party app execution is deny-by-default, and every app
+  load is audited
 
 ## Links
 

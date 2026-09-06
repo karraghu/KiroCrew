@@ -432,3 +432,84 @@ Returns the item count per source **under the active filters**:
 - **The search branch's candidate load runs off the event loop** — a scoped search escalates its candidate pool, so `_load_items_by_id` (batch `SELECT` plus per-row serialization) and the `source_counts` aggregate both run via `asyncio.to_thread`. `store.db` is a per-thread connection, so each worker thread uses its own. Run inline, either can stall the loop past the watchdog threshold on a large KB.
 - **Frontend selection is bounded to on-screen items** — in source-first mode item data lives in per-`SourceGroup` caches, so bulk actions read the items each expanded group reports as rendered, and selected IDs are pruned when a group collapses or pages away. Reading the react-query cache directly would let a bulk Delete reach a retained cache for a source the user can no longer see.
 - **Per-source caches are keyed under the `knowledge-items` prefix** — `['knowledge-items', 'source-items', ...]` and `['knowledge-items', 'source-counts', ...]` so every existing `invalidateQueries(['knowledge-items'])` call site reaches them. Consequently any `setQueriesData` on that prefix must guard on the payload shape, since the counts entry has no `items` array.
+
+## Graph internals
+
+How the entity graph behind knowledge search is built and stored. The
+user-facing behaviour — what gets ingested, what search returns, and the
+citation format — is
+[`src/kiro_crew/docs/knowledge-library-how-it-works.md`](../../../src/kiro_crew/docs/knowledge-library-how-it-works.md).
+
+### Graph Construction
+
+#### Entities → Nodes
+
+Each extracted entity becomes a node in the graph:
+- Deduplication: exact name matching + case-insensitive alias lookup
+- If "DynamoDB" appears in chunk 1 and chunk 5, both map to the same node
+- Stored in SQLite `entities` table + in-memory `SimpleDiGraph`
+
+#### Relations → Edges
+
+Each extracted relation becomes a directed edge:
+- Only created between entities extracted from the **same chunk**
+- Edge types: `owns | uses | works_on | part_of | calls | depends_on`
+- Stored in SQLite `entity_relations` table + in-memory graph
+
+#### Cross-Chunk Connections
+
+There is NO cross-chunk relation extraction (too expensive). Connections across chunks happen through **shared entity names**:
+
+```
+Chunk 1: AuthService ──uses──► DynamoDB
+Chunk 5: BackupService ──depends_on──► DynamoDB
+
+Graph result:
+  AuthService ──uses──► DynamoDB ◄──depends_on── BackupService
+```
+
+The shared "DynamoDB" node creates an implicit connection between AuthService and BackupService — they're 2 hops apart in the graph.
+
+#### Mentions
+
+Every entity-in-chunk creates a `mention` record linking the item (chunk) to the entity. This enables: "show me all chunks that mention DynamoDB."
+
+### Data Model
+
+```
+┌──────────────┐         ┌──────────────┐
+│   sources    │         │   entities   │ ← Graph Nodes
+│ (files/URLs) │         │ (name, type) │
+└──────┬───────┘         └──────┬───────┘
+       │ source_id               │ entity_id
+       ▼                         ▼
+┌──────────────┐         ┌──────────────┐
+│    items     │◄────────│   mentions   │
+│  (chunks)    │ item_id │(item↔entity) │
+└──────────────┘         └──────────────┘
+
+                         ┌──────────────────┐
+                         │ entity_relations  │ ← Graph Edges
+                         │(src→tgt, type)   │
+                         └──────────────────┘
+```
+
+
+### Storage and search implementation
+
+- Embeddings are generated **after** extraction, in the same ingestion pipeline
+- Stored as packed float32 binary in the `items.embedding` BLOB column
+- Vector search uses brute-force cosine similarity
+- Existing items with a stale embedding signature are transparently re-embedded by the signature-gated rebuild
+
+Known gaps in the construction above, stated as current behaviour rather than as
+a plan: entities connect only through shared names, so `auth layer` and
+`AuthService` produce two nodes; `merge_entities` exists but no ingestion path
+calls it; and nothing computes entity communities, so a cluster of related
+entities has no representation a query can select on.
+
+Writers: `knowledge/store.py` (the `entities`, `entity_relations` and `mentions`
+tables, `items.embedding`, the signature-gated re-embed), `knowledge/extractor.py`
+(per-chunk entity and relation extraction), `knowledge/ingestion.py` (chunking,
+dedup, the embedding pass), `knowledge/retrieval.py` (`SimpleDiGraph`, the three
+search legs and their RRF fusion).

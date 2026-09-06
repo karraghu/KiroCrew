@@ -176,7 +176,7 @@ Known gaps, all follow-up work rather than defects:
 
 The channel is a thin transport over the shared messaging core — the same
 `TurnDriver` (credential redaction, tool-approval ladder, SEL audit) every other
-channel uses. See [messaging-transport.md](messaging-transport.md).
+channel uses.
 
 | File | Role |
 | --- | --- |
