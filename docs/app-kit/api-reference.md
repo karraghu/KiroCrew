@@ -357,7 +357,7 @@ Schedule a **script** cron instead and build it on `kiro_crew.irq`, the
 interrupt controller. The script runs in a subprocess with no model call at
 all; a quiet tick is free. Only an unexpected observation raises a wake, and the
 wake is delivered into the session that armed the cron as a real agent turn.
-Full design: `docs/system-specs/features/agent-interrupt-controller.md`.
+Full design: `docs/system-specs/modules/agent-interrupt-controller.md`.
 
 You write the two things that are your domain knowledge — what to poll, and
 what counts as an anomaly — and the module owns masking (so one condition wakes

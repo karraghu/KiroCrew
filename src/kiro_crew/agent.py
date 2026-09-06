@@ -4496,7 +4496,7 @@ def rebuild_agent_config(*, clean: bool = False) -> Path:
     # home for agent-only configuration, so dropping an entry destroys whatever
     # lives only there and stamping ``disabled`` makes ``list_servers`` delete the
     # server's own row. See the follow-up issue linked from
-    # docs/system-specs/features/mcp-probe-quarantine.md.
+    # docs/system-specs/modules/mcp-probe-quarantine.md.
     for name, spec in itertools.chain(
         extra_shared_mcp.items(), shared_mcp.items(), kirocrew_mcp.items()
     ):

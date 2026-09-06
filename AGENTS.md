@@ -43,12 +43,12 @@ in the **same commit** when you change what it documents.
 | MCP servers or tools (adding, changing, statelessness) | [mcp](docs/architecture/mcp.md) |
 | apps, App Kit, manifests, app agents | [app-kit-platform](docs/system-specs/modules/app-kit-platform.md) + [app-kit/](docs/app-kit/README.md) |
 | artifacts, companion chat | [artifacts](docs/system-specs/modules/artifacts.md) |
-| `stt/`, `transcribe.py`, `voice_reply.py`, the mic, dictation, TTS | [stt-streaming](docs/system-specs/features/stt-streaming.md) + [voice-streaming](docs/system-specs/features/voice-streaming.md) |
+| `stt/`, `transcribe.py`, `voice_reply.py`, the mic, dictation, TTS | [stt-streaming](docs/system-specs/modules/stt-streaming.md) + [voice-streaming](docs/system-specs/modules/voice-streaming.md) |
 | cron, learn, dashboard handlers | [learn-cron-dashboard](docs/system-specs/modules/learn-cron-dashboard.md) |
 | Slack, Discord, any channel, messaging, approvals | [messaging](docs/system-specs/modules/messaging.md) + [slack-gateway](docs/system-specs/modules/slack-gateway.md) |
 | subagents, spawn, orphan recovery | [subagent](docs/system-specs/modules/subagent.md) |
 | task runner | [task](docs/system-specs/modules/task.md) + [taskrunner](docs/system-specs/modules/taskrunner.md) |
-| `workflows/` (the dynamic-workflow engine) | [workflows](docs/system-specs/modules/workflows.md) + [workflow-gates](docs/system-specs/modules/workflow-gates.md) |
+| `workflows/` (the dynamic-workflow engine) | [workflows](docs/system-specs/modules/workflows.md) |
 | themes | [themes](docs/system-specs/modules/themes.md) + [theming-contract](website/docs/theming-contract.md) |
 | anything under `website/` | [`website/AGENTS.md`](website/AGENTS.md) |
 | user-facing strings, dates, numbers, sort order | [i18n-catalog](website/docs/i18n-catalog.md) (authoring) + [i18n-gates](docs/ci/i18n-gates.md) (CI) |
@@ -90,7 +90,7 @@ This repo is the de-Amazoned public fork of an internal package. Never re-add:
   pre-approved in Claude's own settings — including a `.claude/settings.json` inside a
   cloned project — never reaches Crew's approval path, so its deny rules and audit log
   do not see that call. Both are disclosed on the Agent Backend panel and in
-  `docs/system-specs/features/claude-code-provider.md`; do not widen the harness's
+  `docs/system-specs/modules/claude-code-provider.md`; do not widen the harness's
   reach further without closing them. A harness added at `agent.acp_backend` is
   governed by
   [Harness parity](#harness-parity-kiro-is-first-class-the-rest-are-adapted) —

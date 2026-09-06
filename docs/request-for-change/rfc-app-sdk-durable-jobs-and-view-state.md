@@ -1,4 +1,23 @@
-# App SDK: durable jobs and view state
+---
+title: App SDK durable jobs and view state
+status: draft
+revision: v1
+author: Kiro Crew
+created: 2026-09-06
+last-audited: 2026-09-06
+audited-at: 424efa423
+doc-pr:
+implementation-prs: []
+tracking-issues: []
+supersedes: []
+superseded-by: []
+---
+# RFC: App SDK durable jobs and view state
+
+Neither surface exists: `useAppJob` and `useAppViewState` appear nowhere in
+`src/kiro_crew` or `website/src`. The run-lifecycle question this shares a boundary
+with is argued in
+[`rfc-durable-run-coordinator.md`](rfc-durable-run-coordinator.md).
 
 ## Current SDK boundary
 

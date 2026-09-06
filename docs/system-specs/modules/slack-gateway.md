@@ -243,7 +243,7 @@ Slack `file_share` messages are processed in `_route_message()` after dedup + au
 - **Mimetypes**: `audio/*`, `video/webm`
 - **Flow**: Download via `SlackClientOps.download_file()` → `transcribe.transcribe_audio()` → transcription text prepended as `[Voice memo transcription]...[End of transcription]`
 - **Config**: Enabled by default (`stt.enabled = true`). `stt.provider` decides where recognition runs, and the default `local` runs it in this process on a resident whisper.cpp model, so a memo costs one model download (`stt.model`, `base` by default) and nothing after that. A stored retired provider degrades to `local`; there is no binary to put on `PATH`. Availability per provider comes from `transcribe.availability_detail()`, which distinguishes a missing `voice` extra from a platform with no prebuilt recognizer and from a macOS too old for the `apple` provider, because those need different fixes. The pinned `imageio-ffmpeg` wheel decodes the memo's ogg/Opus or webm internally and is bundled in desktop releases; users do not install system FFmpeg. Setup: [configuration](../../../src/kiro_crew/docs/configuration.md) § Speech-to-text.
-- **Provider-independent guards**: `transcribe_audio` refuses a sensitive `audio_path` and redacts every provider's output before returning, both before/after dispatch rather than inside a branch, so a provider cannot be added that skips either. See [stt-streaming](../features/stt-streaming.md).
+- **Provider-independent guards**: `transcribe_audio` refuses a sensitive `audio_path` and redacts every provider's output before returning, both before/after dispatch rather than inside a branch, so a provider cannot be added that skips either. See [stt-streaming](stt-streaming.md).
 - **Security**: Transcription output run through `redact_credentials()` + `redact_exfiltration_urls()` before injection. Audio file suffix sanitized to alphanumeric only. `_transcribe_audio_files` records a `slack.download_file` and a transcription SEL entry per memo.
 
 ### Images (`files.py`)
@@ -357,6 +357,27 @@ LLM responses ending with `[OPTIONS: choice1 | choice2 | choice3]` are rendered 
 Action IDs: `options_checkboxes` (toggle), `options_submit` (send). Checkbox `value` contains the choice text.
 
 Beyond the reply-finalization path in `handler.py`, two other Slack delivery paths also render `[OPTIONS: ...]` as buttons: the dashboard `send_message` MCP tool (`api_send_message` in `dashboard/handlers/messaging.py`) and cron subagent delivery (`_deliver_cron_response` in `gateway.py`). Both call `extract_options()` / `build_options_blocks()`, skip the tag parse when the caller supplies explicit `blocks` (those own their own layout), and wrap the follow-up options post in `try/except` so a failed options post never fails the primary message.
+
+### Inline action values (`action::`)
+
+`action::` is an inline-action **value** protocol inside legacy OPTIONS controls, not a general Block Kit routing protocol. `slack.interactions.dispatch` calls `_handle_options` only for action IDs carrying `OPTIONS_ACTION_PREFIX`, which `slack.format` defines for OPTIONS choices; every other action ID reaches the tool-approval fallback when the interaction supplies a channel and message. `test_unknown_action_id_falls_through_to_tool_approval` locks that fallback.
+
+Two gates run before any handler: `is_allowed_user(user_id)` on the dispatcher, and `channel_inbound_permitted("slack")` for OPTIONS interactions. Both are load-bearing because the action value becomes agent-visible context and a routed turn.
+
+An OPTIONS choice whose `value` starts with `action::` enters the action branch of `_handle_options`. The remainder of `value` is an opaque payload — the handler neither parses nor requires JSON — and the visible label comes from `action["text"]["text"]`, falling back to the selected overflow option's text. `_route_action_to_session` then performs the shared delivery:
+
+1. Redact exfiltration URLs and credentials from the label, then attempt to replace matching elements in the source message with a context label.
+2. Post the redacted label as a visible reply in the source thread. A failed post aborts routing, so an agent turn never runs without its visible Slack message; `test_post_message_failure_aborts` locks that ordering.
+3. Redact and bound the payload per `_ACTION_PAYLOAD_CAP`, record the Slack access event, and build an `Action button clicked` context entry.
+4. Call `slack.handler.handle_message` with the source message's `thread_ts`, the new reply timestamp, the visible label, and `action_context`.
+
+`ContextBuilder.build_message` appends a non-empty `action_context` ahead of the message text, so the payload arrives as context rather than displayed verbatim in the thread (`test_redaction_applied_to_payload`). The source-message update is best-effort: `_route_action_to_session` logs and continues when `update_message` fails, so a successful route does not guarantee the original button was visually replaced.
+
+`_mark_button_clicked` walks every `actions` block; for each block containing the supplied action ID it removes every matching element, inserts a `context` block holding `✓ {label}` immediately before that actions block, and omits the actions block once no elements remain. Blocks without a matching element survive untouched. The identifier match is the load-bearing link between Slack's interaction payload and the rendered message, so an action ID reused across separate actions blocks produces one context label per matching block. `TestMarkButtonClicked` covers replacement, no-match input, and empty-block removal.
+
+`_handle_options` also carries a direct-handler branch for an `action_id` beginning with `action::`: it parses the suffix as a JSON object, obtains a selection through `_extract_selected_value` (which handles `selected_option`, date, time and datetime fields), adds `selected_value`, derives a label from `placeholder.text` plus the selected display text, and routes through `_route_action_to_session`. Malformed JSON or a non-object payload stops the branch without routing. **That branch is not reachable through the Slack dispatcher** — `dispatch` forwards only `OPTIONS_ACTION_PREFIX` action IDs, so an `action::` action ID falls through to `_handle_tool_approval`; `test_extended_element_happy_path`, `test_malformed_json_in_action_id_no_crash` and `test_non_dict_json_in_action_id_no_crash` exercise `_handle_options` directly. An element with an `OPTIONS_ACTION_PREFIX` action ID whose selected value starts with `action::` enters the value branch instead, where that value is the opaque payload and no base JSON object is merged with `selected_value`. Agents must not treat `action::` in an extended element's `action_id` as an available Slack protocol.
+
+`test/test_action_interactions.py` covers the direct action-handler path, payload redaction, audit logging and the block-transforming helpers; `test/test_slack_interactions_coverage.py::TestDispatchPayloadParsing::test_unknown_action_id_falls_through_to_tool_approval` covers the dispatch boundary that excludes arbitrary action IDs.
 
 ## Messaging Transport (`messaging.use_transport`)
 

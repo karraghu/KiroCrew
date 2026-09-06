@@ -62,6 +62,7 @@ was added 2026-08-27. The `rfc-crew-agent-sdk-boundary` row was added 2026-08-28
 | [rfc-crew-projects.md](rfc-crew-projects.md) | `draft` | Nothing. Verified at `5cd92ff99`: no project manifest format exists, `slot.project` is a bare directory path, and `grep -ril "confluence\|servicenow" src/kiro_crew` returns zero hits |
 | [rfc-tool-derived-diff-cards.md](rfc-tool-derived-diff-cards.md) | `in-progress` | Ships with [#5012](https://github.com/kirodotdev/KiroCrew/pull/5012): dashboard diff-card/summary promotion + runtime-selected prompt rule. The messaging `OutputEvent` extension (§3.3) is unstarted |
 | [rfc-agentcore-identity-gateway.md](rfc-agentcore-identity-gateway.md) | `in-progress` | First stack PR lands the `agent_identity` CPP slot, `DefaultAgentIdentityProvider` no-op, `capabilities.agentcore` catalog row, and AWS-free policy validators. No AWS extra, no Gateway inject, no login attach, no Settings UI |
+| [rfc-app-sdk-durable-jobs-and-view-state.md](rfc-app-sdk-durable-jobs-and-view-state.md) | draft | A gateway-side durable run record so a long app action survives unmount and restart, plus URL-backed view state. Nothing shipped. |
 
 Nothing in this directory is `implemented` or `superseded` today.
 

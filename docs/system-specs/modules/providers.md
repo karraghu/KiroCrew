@@ -31,7 +31,7 @@ multi-provider dispatch factory. `acp/client.py` keeps a dormant
 `claude-agent-acp`) so an internal companion can re-register a Claude backend,
 but the public provider factory never selects it — `kiro-cli` is the only
 backend.
-See [`../features/claude-code-provider.md`](../features/claude-code-provider.md).
+See [`claude-code-provider.md`](claude-code-provider.md).
 
 ### LLMProvider ABC (`providers/base.py`)
 
