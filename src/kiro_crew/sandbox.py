@@ -5361,7 +5361,9 @@ def _cleanup_legacy_mount_source_residue() -> int:
 
     - only on the session runtime tmpfs the launcher picks first
       (:func:`_launcher_tmpfs_roots`), never ``/dev/shm`` or the shared system
-      tempdir, where another same-uid program's ``tempfile`` scratch lives;
+      tempdir, where another same-uid program's ``tempfile`` scratch lives —
+      and when no such root is PRESENT the pass returns before the pin scan,
+      because there is nowhere for an entry of this class to be;
     - only ``tempfile``'s exact shape (:data:`_LEGACY_MOUNT_SOURCE_RE`);
     - only DIRECTORIES owned by THIS uid with the exact mode ``mkdtemp``
       creates (0o700) — a hand-made or umask-shaped entry is not one of
@@ -5398,7 +5400,20 @@ def _cleanup_legacy_mount_source_residue() -> int:
             return 0
     except OSError:
         return 0
-    roots = _launcher_tmpfs_roots()
+    roots = [root for root in _launcher_tmpfs_roots() if os.path.isdir(root)]
+    if not roots:
+        # Nothing this pass may walk is present, so no entry of this class can
+        # be here to reclaim: every host off Linux (``/run/user/$UID`` is a
+        # logind construct), and a Linux host whose session runtime dir is
+        # absent. Return BEFORE the pin scan, not after it: that scan reads
+        # ``/proc``, which off Linux does not exist, so the coverage claim below
+        # can never be established there and the pass reported an unprovable
+        # scan at WARNING on every tick — for a root it was never going to
+        # walk. The marker is deliberately NOT stamped: this branch verified no
+        # residue, it merely found nowhere to look, and a repeat pass now costs
+        # one stat, so retiring the pass here would trade a free no-op for a
+        # claim it cannot make.
+        return 0
     coverage = _PinScanCoverage()
     bound, complete = _bound_source_basenames(coverage=coverage)
     if not (complete or coverage.covered):
