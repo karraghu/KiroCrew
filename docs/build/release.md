@@ -555,7 +555,7 @@ signed with a non-exportable RSA KMS key:
   "channel": "insider",
   "key_id": "sha256:<SubjectPublicKeyInfo DER digest>",
   "pub_date": "2026-07-18T06:15:00Z",
-  "python_requires": ">=3.10",
+  "python_requires": ">=3.12",
   "schema": "kirocrew-cli-artifact-manifest-v1",
   "sha256": "<wheel digest>",
   "signature": "<base64 RSA signature over canonical JSON without this field>",
@@ -1152,7 +1152,7 @@ Practical consequences when something goes wrong mid-release:
 Every release lands a `## [X.Y.Z] - YYYY-MM-DD` section in `CHANGELOG.md`
 through a normal PR, alongside any version bump. The section format (ordering,
 tone, the three-sentence budget per subsection) is specified once in
-[AGENTS.md](../../AGENTS.md) → "Release Changelog". The dashboard reads the
+[changelog.md](changelog.md). The dashboard reads the
 changelog from `KIROCREW_PROJECT_DIR/CHANGELOG.md` for source installs and from
 the bundled copy inside the package for wheel installs.
 

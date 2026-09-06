@@ -288,8 +288,10 @@ _BACKGROUND_CC_MODEL = "claude-sonnet-4.6"
 def _background_agent_model() -> str:
     """Kiro-spec model for background worker agents (lite / heartbeat).
 
-    Resolves ``agent.role_models['background']`` -> ``agent.model`` -> ``"auto"``
-    (see :meth:`AgentConfig.resolve_model`). Defaults to ``"auto"`` — which the
+    Resolves ``agent.role_models['background']`` -> ``"auto"``, deliberately NOT
+    inheriting ``agent.model`` (see :meth:`AgentConfig.resolve_model`), so a user's
+    chat model never silently becomes the price of every background task.
+    Defaults to ``"auto"`` — which the
     provider resolves server-side against the account's entitlement — so a
     background agent stays usable on every subscription tier unless an operator
     deliberately pins a (cheaper) model. Never raises: a config hiccup falls

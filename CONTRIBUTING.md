@@ -37,7 +37,7 @@ tell you in a paragraph.
 
 - macOS, Linux, or Windows — Windows builds and runs natively from source, with
   the documented feature limits in the [Windows guide](docs/guides/windows-install.md)
-- Python ≥ 3.10
+- Python >= 3.12
 - Node.js ≥ 22 (24 LTS recommended) and npm (for the frontend)
 - The `kiro-cli` agent on your `PATH`, logged in (`kiro-cli login`) — it is the
   only LLM backend (`agent.provider = acp`)
@@ -252,7 +252,7 @@ git push origin v0.2.0
 ```
 
 Update `CHANGELOG.md` with a `## [X.Y.Z] - YYYY-MM-DD` section as part of the
-release (see AGENTS.md → "Release Changelog" for the format), and land the
+release (see [docs/build/changelog.md](docs/build/changelog.md) for the format), and land the
 changelog and any version bump through a normal PR — never push to `main` or a
 release branch directly.
 
@@ -343,7 +343,7 @@ Key entry points:
 | Rule | Standard |
 |------|----------|
 | Line length | 100 chars (black) |
-| Python | ≥ 3.10, `from __future__ import annotations` |
+| Python | >= 3.12, `from __future__ import annotations` |
 | Logging | `import logging` + `logger = logging.getLogger(__name__)` |
 | Async | `asyncio` throughout, `async def` for all I/O |
 | Data | `@dataclass` for containers |
@@ -599,9 +599,11 @@ required check pass, so it is not a substitute for any of the above.)
 <body — what and why, not how>
 ```
 
-Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
+Types the PR-title gate accepts: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`,
+`test`, `chore`, `ci`, `build`, `revert`.
 
-Rules: imperative mood, lowercase summary, no trailing period, wrap body at 72 chars.
+Rules: imperative mood, lowercase summary of at most 72 chars, no trailing period,
+wrap the body at 72 chars, and one logical change per commit.
 
 ## Recognizing Contributions
 

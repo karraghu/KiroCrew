@@ -13,8 +13,13 @@ readers still trust it.
 | [features/](features/README.md) | User-visible features that span several modules. A feature owned by one subsystem belongs in its module spec instead. |
 | [common/](common/README.md) | Cross-cutting conventions every module obeys: code style, error handling, testing, injected messages. |
 
-[post-launch-removals.md](post-launch-removals.md) is the one root-level spec: a
-cross-module ledger of what was deliberately removed and why it must not come back.
+Two root-level specs sit outside the tiers:
+
+- [oss-fork-boundaries.md](oss-fork-boundaries.md) — what this public fork must never
+  re-introduce, the modules that are deliberately inert, and the fork's intentional UX
+  divergences.
+- [post-launch-removals.md](post-launch-removals.md) — a cross-module ledger of what
+  was deliberately removed and why it must not come back.
 
 ## Related, outside this tree
 

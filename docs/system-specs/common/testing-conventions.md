@@ -296,6 +296,13 @@ which testpath asked for the workers.
   across ~10 files that every one of which passes in isolation — which is exactly why
   it reads as "the suite is flaky" instead of as one test missing one line.
 
+- **A child process inherits pytest's CWD, which is the repo root.** A spawn that may
+  create a file therefore writes into the checkout unless it is given
+  `cwd=` under `tmp_path`. Scope the assertion to where the child actually ran, not to
+  where you hoped it wrote: an assertion against `tmp_path` passes vacuously while the
+  file lands in the repo, and neither the test nor the residue check attributes it to
+  this test.
+
 - **A singleton with a background thread beats every filesystem cleanup.** `sel.py` is
   the worked example: `SecurityEventLog` is a process singleton whose writer is a
   *daemon thread*, and `_init_locked` binds its directory **once**, from whatever
@@ -835,11 +842,11 @@ stopping it propagating is the part that is never optional.
 
 ### 5. Absolute time budgets on instrumented runs
 
-Asserting a *duration* when the property under test is algorithmic **complexity**. CI enables
-coverage on one Python version only (`--cov` on 3.12, `--no-cov` on 3.10), and instrumentation
-multiplies the cost of every executed line — so the same un-regressed code measured ~1.7s of CPU
-bare and >5s under coverage, and one shard failed on 3.12 while passing on 3.10 **at the identical
-commit**. The tell is a timing test that splits by Python version rather than by machine load.
+Asserting a *duration* when the property under test is algorithmic **complexity**. Coverage
+instrumentation multiplies the cost of every executed line — so the same un-regressed code
+measured ~1.7s of CPU bare and >5s under coverage, and a shard that runs `--no-cov` passes
+while an instrumented one fails **at the identical commit**. The tell is a timing test whose
+verdict depends on whether coverage was enabled rather than on machine load.
 
 `time.process_time` fixes only the other half: it removes co-tenant scheduling noise, but CPU time
 still includes the instrumentation, so an absolute ceiling stays version-dependent.

@@ -246,7 +246,7 @@ testing-conventions § Determinism 1.
 
 ## Rule 3 — Cross-platform: macOS, Linux (x86_64 + arm64), Windows
 
-- **Route POSIX calls through `platform_compat`.** See AGENTS.md's shim table. Most
+- **Route POSIX calls through `platform_compat`.** See docs/system-specs/common/platform-compat.md. Most
   important: `os.kill(pid, 0)` **TERMINATES** the target on Windows — it is not a
   liveness probe. Use `platform_compat.pid_exists`.
 - **Path length is a real constraint.** Windows caps a path at 260 characters unless
