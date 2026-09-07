@@ -1217,8 +1217,8 @@ being agent-unwritable. See [computer-use.md](computer-use.md) → "Known limita
 ## Profile resolution + binding
 
 A profile binds to a `surface` (cron/slack/dashboard/subagent/…), an `app` slug,
-or a `task` id. `resolve_active_scope(session_key, agent, app)` resolves the
-active profile, classifying the session key via `sel._infer_source` (the single
+or a `task` id. `resolve_active_scope(session_key, *, agent, app)` resolves
+the active profile, classifying the session key via `sel._infer_source` (the single
 canonical taxonomy parser — never re-implemented). Resolution is:
 
 - **app bind → task/agent bind → surface bind** (most specific first).
@@ -1226,6 +1226,50 @@ canonical taxonomy parser — never re-implemented). Resolution is:
 - No bound profile on an **unattended + unproven** surface → `deny_all_profile`
   (fail-closed, never a permissive fall-through), mirroring the dashboard
   `api_session_tool_policy` precedent.
+
+**INVARIANT — a call site must STATE every identity it has.** The optional inputs
+default falsy, and the precedence paths above each consult a different subset, so
+a call site that omits one does not fail, does not warn, and does not read as
+wrong. Be exact about the consequence: the lookups are
+truthiness-gated, so an omission is byte-identical AT RUNTIME to an explicit
+`""`, and the scope widens only where the operator has BOUND a profile to the
+identity the call then fails to consult. The rule therefore buys reviewability,
+not a behaviour change — "this surface has no app" and "nobody considered the
+app" stop rendering as the same source. So: **an explicit `""` is a declaration
+and silence is a defect.**
+
+The class is not hypothetical: one in-review change walked the gap four times in
+one file (a skipped scope query, an undisclosed target, an unconsulted caller
+profile, a caller riding the `app` positional), each round fixing exactly one,
+and a second open change carries it on the Slack surface, where an unresolved
+project agent silently runs as the default. Both are open pull requests as this
+lands, so their numbers are not cited here — `git log` cannot confirm an unmerged
+PR, and a spec citing one gives a future reader nothing to check.
+
+`scripts/check_authz_inputs.py` enforces the rule at the call site for
+`resolve_active_scope`, `governance_permits`, `_vet_spawn_governance` and
+`HookManager.on_tool_call`, behind the shrink-only
+`.github/authz-inputs-baseline.txt`; it also rejects an identity riding a
+positional slot (`_vet_spawn_governance`'s third positional is `app`, so a
+positional caller binds there, type-checks, runs and enforces nothing) and an
+opaque `*args`/`**splat` it cannot prove complete. Its `AUTHZ_FUNCS` table is
+checked against the real signatures on every run, because the gate's own first
+cut demanded a parameter that did not exist and its self-test passed anyway.
+
+Two things the gate deliberately does NOT do. It does not demand
+`resolved_agent` on `on_tool_call`: omitting that one is FAIL-CLOSED, not
+widening — `owner_app = app or _builtin_app_for_agent(resolved_agent)` gates an
+auto-approve, so an empty value yields no identity and falls to interactive
+approval. And it does not check a positional identity where one cannot travel
+positionally: the budget is derived from each signature, so for a keyword-only
+entry point — three of the four — the check is skipped, because a surplus
+positional is a `TypeError` rather than an unseen defect. Make
+`_vet_spawn_governance`'s `app` keyword-only and that class becomes
+unrepresentable everywhere, retiring the rule.
+
+An `_AuthContext` with no defaults would be strictly stronger than any of this,
+making omission a type error rather than a lint; read the gate as the stopgap
+that keeps the class from growing until that refactor is funded.
 
 **`identity_proven` is true for ANY non-empty session key**, so an unattended
 surface that *does* carry a key — `cron:<job>`, `subagent:<id>`, `taskrunner` —

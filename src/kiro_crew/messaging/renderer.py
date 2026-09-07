@@ -696,8 +696,12 @@ class Renderer(ABC):
         elif event.kind == THINKING:
             await self.on_thinking(event.text)
         elif event.kind == TOOL_CALL:
-            await self.on_tool_call(
-                event.tool_call_id, event.title, event.tool_kind, event.tool_purpose
+            await self.on_tool_call(  # authz-inputs: this renderer's OWN display
+                # method (:637), not HookManager's -- a name collision, no authz.
+                event.tool_call_id,
+                event.title,
+                event.tool_kind,
+                event.tool_purpose,
             )
         elif event.kind == PROMPT_CHOICE:
             await self.on_prompt_choice(

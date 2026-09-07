@@ -1,0 +1,30 @@
+# authz-inputs gate baseline -- see scripts/check_authz_inputs.py.
+# Shrink-only: a file may improve, never regress.
+1 src/kiro_crew/agent.py
+1 src/kiro_crew/agent_backend_governance.py
+1 src/kiro_crew/apps/manager.py
+1 src/kiro_crew/beacon.py
+1 src/kiro_crew/cli_chat.py
+1 src/kiro_crew/dashboard/chat_runner.py
+1 src/kiro_crew/dashboard/handlers/security.py
+1 src/kiro_crew/dashboard/handlers/themes.py
+1 src/kiro_crew/dashboard/handlers_system.py
+1 src/kiro_crew/dashboard/tailnet.py
+1 src/kiro_crew/discord/transport_dispatch.py
+1 src/kiro_crew/hooks.py
+2 src/kiro_crew/mcp_core.py
+2 src/kiro_crew/mcp_cron.py
+1 src/kiro_crew/mcp_gateway/app_call.py
+1 src/kiro_crew/messaging/dispatch.py
+1 src/kiro_crew/messaging/identity.py
+1 src/kiro_crew/platform/governance_profiles.py
+1 src/kiro_crew/publish_governance.py
+2 src/kiro_crew/safety_override.py
+2 src/kiro_crew/slack/enterprise.py
+1 src/kiro_crew/slack/gateway.py
+2 src/kiro_crew/slack/handler.py
+1 src/kiro_crew/slack/transport_dispatch.py
+2 src/kiro_crew/subagent.py
+1 src/kiro_crew/task_executor.py
+1 src/kiro_crew/task_planner.py
+1 src/kiro_crew/telegram/transport_dispatch.py

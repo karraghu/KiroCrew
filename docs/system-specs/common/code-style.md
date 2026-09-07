@@ -81,7 +81,8 @@ The blocking gates are black (baselined), the subprocess-encoding gate (baseline
 committing:
 
 ```bash
-python3 scripts/check_black_formatting.py && python3 scripts/check_subprocess_encoding.py && isort src/kiro_crew test
+python3 scripts/check_black_formatting.py && python3 scripts/check_subprocess_encoding.py
+python3 scripts/check_authz_inputs.py && isort src/kiro_crew test
 flake8 src/kiro_crew test && mypy src/kiro_crew
 python -m pytest
 ```
@@ -141,6 +142,23 @@ import the package write `encoding="utf-8", errors="replace"` inline. A child
 that genuinely writes in the console encoding (`ps`, `systeminfo`, user shells)
 keeps locale decoding and says so with an inline `# subprocess-encoding: locale`
 marker — an audit trail, not an escape hatch.
+
+## Authorization calls state every identity they have
+
+`resolve_active_scope` takes three identity inputs — `session_key`, `agent` and
+`app` — and the optional ones default falsy, so omitting one at a call
+site neither fails nor warns, and where the operator has bound a profile to that
+identity the call resolves a wider scope than configured. The lookups are
+truthiness-gated, so an explicit `""` resolves identically at runtime: what it buys
+is that a considered decision and an oversight stop looking the same. Pass the
+value, or pass an explicit `""` to DECLARE that this surface has none; silence is
+the defect, not emptiness. CI gates this with `scripts/check_authz_inputs.py` (AST-based
+like its sibling above, so a multi-line call is judged as one call), behind the
+shrink-only `.github/authz-inputs-baseline.txt`. A site that genuinely cannot supply
+one, and for which `""` would be a lie rather than a declaration, opts out with an
+inline comment — `# authz-inputs: <reason>` — which is an audit trail naming a
+reason a reviewer can disagree with, not a silent escape. See `governance.md`
+§ Profile resolution + binding for the invariant and why it recurs.
 
 ## Frontend
 

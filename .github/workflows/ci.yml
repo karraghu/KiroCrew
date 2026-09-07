@@ -429,6 +429,18 @@ jobs:
           python3 scripts/check_subprocess_encoding.py --test
           python3 scripts/check_subprocess_encoding.py
 
+      # An authorization call must state every identity input it has: an omitted
+      # one is invisible at the call site, and where the operator has bound a
+      # profile to that identity the call resolves a wider scope than configured.
+      # The remediation is a DECLARATION, not a behaviour change -- the resolver
+      # is truthiness-gated, so an explicit "" resolves what omission resolved.
+      # Self-test first, for the same reason as the gate above: a typo that
+      # disables a rule must fail here rather than ship green.
+      - name: Check authorization identity inputs (gate, baselined)
+        run: |
+          python3 scripts/check_authz_inputs.py --test
+          python3 scripts/check_authz_inputs.py
+
       # Application code must reach the agent backend through kiro_crew.agent_sdk,
       # not by importing kiro_crew.acp (or kiro_crew.providers, which re-exports
       # the same ACP shapes and would otherwise be a laundering channel). Today's

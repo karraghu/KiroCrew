@@ -1294,7 +1294,6 @@ def resolve_active_scope(
     *,
     agent: str = "",
     app: str = "",
-    task: str = "",
 ) -> Optional[Profile]:
     """Resolve the active profile for a tool call, or ``None`` for policy-only.
 
@@ -1302,7 +1301,9 @@ def resolve_active_scope(
 
     1. ``app`` bind — when an app is the active context, its per-app profile
        bounds the blast radius (the design's headline per-app use case).
-    2. ``task`` bind — a specific spawned task's profile.
+    2. ``task`` bind, keyed on the AGENT name — a spawned agent's own profile,
+       so its ceiling wins over its surface's default. This is the only way a
+       ``task``-type bind is reached: there is no ``task`` parameter.
     3. ``surface`` bind — the surface inferred from the session key.
 
     Returns ``None`` when no profile is bound AND the surface is attended/proven
@@ -1345,14 +1346,15 @@ def resolve_active_scope(
         prof = _for_bind(Bind(type="app", id=app))
         if prof is not None:
             return prof
-    if task:
-        prof = _for_bind(Bind(type="task", id=task))
-        if prof is not None:
-            return prof
 
-    # An agent name may carry its own task-scoped profile (e.g. a tightly-scoped
-    # "researcher" agent), checked before the broad surface binding so a spawned
-    # agent's own ceiling wins over its surface's default.
+    # A `task`-type bind is reached through the AGENT name: an agent may carry its
+    # own task-scoped profile (a tightly-scoped "researcher", say), checked before
+    # the broad surface binding so a spawned agent's own ceiling wins over its
+    # surface's default. There was also a separate `task=` parameter binding the
+    # same `Bind(type="task", ...)` namespace one branch earlier; nothing in the
+    # tree ever passed it, and it could resolve nothing this branch cannot, so it
+    # was removed rather than left as a fourth identity every call site had to
+    # declare. Operators are unaffected -- the bind type is unchanged.
     if agent:
         prof = _for_bind(Bind(type="task", id=agent))
         if prof is not None:
