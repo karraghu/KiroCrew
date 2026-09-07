@@ -134,9 +134,12 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import io
 import sys
+import tempfile
 import tokenize
+from collections.abc import Iterator
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -795,234 +798,151 @@ def run_gate(baseline_path: Path, *, update: bool, list_only: bool) -> int:
 
 
 def _self_test() -> int:
-    """Prove the gate on hand-written sources, independent of the tree's state."""
-    cases: list[tuple[str, str, int, str]] = [
-        (
-            "complete call is clean",
-            'governance_permits("apps", n, session_key=k, agent=a, app=p)',
-            0,
-            "",
-        ),
-        (
-            "explicit empty is a DECLARATION, not a violation",
-            'governance_permits("apps", n, session_key=k, agent="", app="")',
-            0,
-            "",
-        ),
-        (
-            "a silently omitted identity is the defect",
+    """Prove the gate on hand-written sources, independent of the tree's state.
+
+    Shaped like the sibling gates: a `clean` probe must yield nothing and a
+    `flagged` probe must yield exactly one finding whose reason contains the
+    needle. The needle is the load-bearing half rather than decoration -- several
+    defects found in review were a rule firing for the WRONG reason, which a bare
+    count cannot tell apart from a right one. A `want: int` column was carried
+    here for a while and was pure redundancy: no probe ever wanted two findings,
+    so which table a probe sits in already says what it expects.
+    """
+    clean: dict[str, str] = {
+        "complete call is clean": 'governance_permits("apps", n, session_key=k, agent=a, app=p)',
+        "explicit empty is a DECLARATION, not a violation": 'governance_permits("apps", n, session_key=k, agent="", app="")',
+        "the spawn ceiling through to_thread is unwrapped and judged": "await asyncio.to_thread(_vet_spawn_governance, k, t, app=p)",
+        "a dict-literal splat IS resolvable": 'governance_permits(s, n, **{"session_key": k, "agent": a, "app": p})',
+        "the marker exempts, as a comment": 'governance_permits("apps", n)  # authz-inputs: boot-time, no session',
+        "a trailing marker on a MULTI-LINE call's opening line exempts it": "await self.on_tool_call(  # authz-inputs: unrelated same-named method\n    a, b, c, d\n)\n",
+        "the definition itself is not a call site": "def governance_permits(scope, item, *, session_key='', agent='', app=''):\n    return _resolve(scope)\n",
+        "B3: a recursive forward inside its OWN def is exempt": "def governance_permits(scope, item, **kw):\n    return governance_permits(scope, item, **kw)\n",
+        "N1: a partial that DOES bind every identity is clean": "cb = functools.partial(governance_permits, s, i, session_key=k, agent=a, app=p)",
+        "N1: a partial over an unrelated function is not our business": "cb = functools.partial(some_helper, s, i)",
+        "H4: an authz function passed as DATA is not an invocation": "loop.run_in_executor(None, register_hook, governance_permits)",
+        "resolved_agent is NOT demanded -- omitting it fail-closes, not widens": "gate.hooks.on_tool_call(title, session_key=k, agent=a, app=p)",
+    }
+    flagged: dict[str, tuple[str, str]] = {
+        "a silently omitted identity is the defect": (
             'governance_permits("apps", n, session_key=k, agent=a)',
-            1,
             "does not state app",
         ),
-        (
-            "two omitted identities are one finding naming both",
+        "two omitted identities are one finding naming both": (
             'governance_permits("apps", n, session_key=k)',
-            1,
             "does not state agent, app",
         ),
-        (
-            "the spawn ceiling through to_thread is unwrapped and judged",
-            "await asyncio.to_thread(_vet_spawn_governance, k, t, app=p)",
-            0,
-            "",
-        ),
-        (
-            "a threaded ceiling call that omits the app it has",
+        "a threaded ceiling call that omits the app it has": (
             "await asyncio.to_thread(_vet_spawn_governance, k, t)",
-            1,
             "does not state app",
         ),
-        (
-            "the positional-collision trap: caller riding the app slot",
+        "the positional-collision trap: caller riding the app slot": (
             "await asyncio.to_thread(_vet_spawn_governance, k, t, c)",
-            1,
             "app is reachable positionally",
         ),
-        (
-            "an opaque splat cannot be proven complete",
+        "an opaque splat cannot be proven complete": (
             "governance_permits(s, n, **ctx)",
-            1,
             "opaque **splat",
         ),
-        (
-            "a dict-literal splat IS resolvable",
-            'governance_permits(s, n, **{"session_key": k, "agent": a, "app": p})',
-            0,
-            "",
-        ),
-        (
-            "the marker exempts, as a comment",
-            'governance_permits("apps", n)  # authz-inputs: boot-time, no session',
-            0,
-            "",
-        ),
-        (
-            "a trailing marker on a MULTI-LINE call's opening line exempts it",
-            "await self.on_tool_call(  # authz-inputs: unrelated same-named method\n"
-            "    a, b, c, d\n)\n",
-            0,
-            "",
-        ),
-        (
-            "a marker ABOVE a call does NOT exempt it -- no forward reach",
-            "# authz-inputs: this justifies something else entirely\n"
-            "hooks.on_tool_call(title, session_key=k, agent=a)\n",
-            1,
+        "a marker ABOVE a call does NOT exempt it -- no forward reach": (
+            "# authz-inputs: this justifies something else entirely\nhooks.on_tool_call(title, session_key=k, agent=a)\n",
             "does not state app",
         ),
-        (
-            "a marker cannot reach PAST a comment block onto a later call",
-            "# authz-inputs: the renderer's own display method, not\n"
-            "# HookManager.on_tool_call -- a name collision\n"
-            "hooks.on_tool_call(title, session_key=k, agent=a)\n",
-            1,
+        "a marker cannot reach PAST a comment block onto a later call": (
+            "# authz-inputs: the renderer's own display method, not\n# HookManager.on_tool_call -- a name collision\nhooks.on_tool_call(title, session_key=k, agent=a)\n",
             "does not state app",
         ),
-        (
-            "a comment merely MENTIONING the marker suppresses nothing",
-            "# the authz-inputs: gate demands every identity be stated\n"
-            "hooks.on_tool_call(title, session_key=k, agent=a)\n",
-            1,
+        "a comment merely MENTIONING the marker suppresses nothing": (
+            "# the authz-inputs: gate demands every identity be stated\nhooks.on_tool_call(title, session_key=k, agent=a)\n",
             "does not state app",
         ),
-        (
-            "the marker inside a STRING does not exempt",
+        "the marker inside a STRING does not exempt": (
             'governance_permits("apps", n, doc="authz-inputs: nope")',
-            1,
             "does not state",
         ),
-        (
-            "the definition itself is not a call site",
-            "def governance_permits(scope, item, *, session_key='', agent='', app=''):\n"
-            "    return _resolve(scope)\n",
-            0,
-            "",
-        ),
-        (
-            "B3: a recursive forward inside its OWN def is exempt",
-            "def governance_permits(scope, item, **kw):\n"
-            "    return governance_permits(scope, item, **kw)\n",
-            0,
-            "",
-        ),
-        (
-            "B3: defining the name does NOT blind the rest of the file",
-            "def governance_permits(scope, item, *, session_key='', agent='', app=''):\n"
-            "    return _resolve(scope)\n"
-            "\n"
-            "def elsewhere(k):\n"
-            "    return governance_permits('tools', 'x', session_key=k)\n",
-            1,
+        "B3: defining the name does NOT blind the rest of the file": (
+            "def governance_permits(scope, item, *, session_key='', agent='', app=''):\n    return _resolve(scope)\n\ndef elsewhere(k):\n    return governance_permits('tools', 'x', session_key=k)\n",
             "does not state agent, app",
         ),
-        (
-            "B3: a nested callback sharing the name blinds nothing",
-            "def unrelated():\n"
-            "    def on_tool_call(x):\n"
-            "        return x\n"
-            "    return hooks.on_tool_call(title, session_key=k, agent=a)\n",
-            1,
+        "B3: a nested callback sharing the name blinds nothing": (
+            "def unrelated():\n    def on_tool_call(x):\n        return x\n    return hooks.on_tool_call(title, session_key=k, agent=a)\n",
             "does not state app",
         ),
-        (
-            "B4: run_in_executor cannot name an identity, so the wrapper is the finding",
+        "B4: run_in_executor cannot name an identity, so the wrapper is the finding": (
             "loop.run_in_executor(None, _vet_spawn_governance, k, t, p)",
-            1,
             "accepts no keyword arguments",
         ),
-        (
-            "B4: the bare one-arg form resolves the callee, not the executor",
+        "B4: the bare one-arg form resolves the callee, not the executor": (
             "loop.run_in_executor(_vet_spawn_governance)",
-            1,
             "accepts no keyword arguments",
         ),
-        (
-            "N1: a bare functools.partial is judged on what it binds",
+        "N1: a bare functools.partial is judged on what it binds": (
             "cb = functools.partial(governance_permits, s, i)",
-            1,
             "does not state agent, app, session_key",
         ),
-        (
-            "N1: a partial inside a kwargless wrapper is still judged",
+        "N1: a partial inside a kwargless wrapper is still judged": (
             "loop.run_in_executor(None, functools.partial(governance_permits, s, i))",
-            1,
             "does not state agent, app, session_key",
         ),
-        (
-            "N1: a partial inside to_thread is still judged",
+        "N1: a partial inside to_thread is still judged": (
             "await asyncio.to_thread(functools.partial(governance_permits, s, i))",
-            1,
             "does not state agent, app, session_key",
         ),
-        (
-            "N1: a partial that DOES bind every identity is clean",
-            "cb = functools.partial(governance_permits, s, i, session_key=k, agent=a, app=p)",
-            0,
-            "",
-        ),
-        (
-            "N1: a partial over an unrelated function is not our business",
-            "cb = functools.partial(some_helper, s, i)",
-            0,
-            "",
-        ),
-        (
-            "H4: an authz function passed as DATA is not an invocation",
-            "loop.run_in_executor(None, register_hook, governance_permits)",
-            0,
-            "",
-        ),
-        (
-            "M5: an opaque *args defeats the positional budget and is unresolvable",
+        "M5: an opaque *args defeats the positional budget and is unresolvable": (
             "governance_permits(*args, session_key=k, agent=a, app=p)",
-            1,
             "opaque *args",
         ),
-        (
-            "the CLI hooks gate shape: the app it has is omitted",
+        "the CLI hooks gate shape: the app it has is omitted": (
             "gate.hooks.on_tool_call(title, session_key=k, agent=a)",
-            1,
             "does not state app",
         ),
-        (
-            "resolved_agent is NOT demanded -- omitting it fail-closes, not widens",
-            "gate.hooks.on_tool_call(title, session_key=k, agent=a, app=p)",
-            0,
-            "",
-        ),
-    ]
-    failed = 0
-    for name, src, want, needle in cases:
-        got = _findings_in_source(src)
-        ok = len(got) == want and (not needle or any(needle in f.reason for f in got))
-        if not ok:
-            failed += 1
-            print(f"  FAIL {name}: wanted {want} finding(s) matching {needle!r}, got {got}")
-        else:
-            print(f"  ok   {name}")
+    }
 
-    extra = 0
+    # (label, passed) per assertion. The run total is COUNTED off this rather than
+    # declared in a constant: a hand-maintained total is the same drift surface as
+    # the hand-maintained positional budget this gate stopped carrying.
+    results: list[tuple[str, bool]] = []
+
+    def check(label: str, ok: bool, detail: str = "") -> None:
+        results.append((label, ok))
+        if ok:
+            print(f"  ok   {label}")
+        else:
+            print(f"  FAIL {label}" + (f": {detail}" if detail else ""))
+
+    @contextlib.contextmanager
+    def rooted(path: Path) -> Iterator[None]:
+        """Point signature reads at a probe tree; ROOT is module-level state."""
+        saved = globals()["ROOT"]
+        globals()["ROOT"] = path
+        try:
+            yield
+        finally:
+            globals()["ROOT"] = saved
+
+    for label, source in clean.items():
+        found = _findings_in_source(source)
+        check(label, not found, f"wanted no finding, got {found}")
+
+    for label, (source, needle) in flagged.items():
+        found = _findings_in_source(source)
+        check(
+            label,
+            len(found) == 1 and needle in found[0].reason,
+            f"wanted one finding matching {needle!r}, got {found}",
+        )
 
     try:
         _findings_in_source("def broken(:\n")
     except SyntaxError:
-        print("  ok   an unparseable source raises rather than reading clean")
+        check("an unparseable source raises rather than reading clean", True)
     else:
-        failed += 1
-        print("  FAIL an unparseable source did not raise")
-    extra += 1
+        check("an unparseable source raises rather than reading clean", False)
 
-    # B1: the table must agree with the signatures it claims to read, and the
-    # check must actually FIRE on a fabricated parameter -- the original defect
-    # was a table naming `caller_agent` while every case here still passed.
-    live = _table_drift()
-    if live:
-        failed += 1
-        print(f"  FAIL AUTHZ_FUNCS has drifted from the tree: {live}")
-    else:
-        print("  ok   AUTHZ_FUNCS matches every signature it reads")
-    extra += 1
+    # B1: the table must agree with the signatures it claims to read, and the check
+    # must actually FIRE on a fabricated parameter -- the original defect was a
+    # table naming `caller_agent` while every case here still passed.
+    drift = _table_drift()
+    check("AUTHZ_FUNCS matches every signature it reads", not drift, str(drift))
 
     spec = AUTHZ_FUNCS["governance_permits"]
     AUTHZ_FUNCS["governance_permits"] = AuthzFunc(
@@ -1032,12 +952,11 @@ def _self_test() -> int:
         caught = _table_drift()
     finally:
         AUTHZ_FUNCS["governance_permits"] = spec
-    if any("no_such_param" in line for line in caught):
-        print("  ok   a fabricated identity parameter is caught as table drift")
-    else:
-        failed += 1
-        print(f"  FAIL table drift went undetected: {caught}")
-    extra += 1
+    check(
+        "a fabricated identity parameter is caught as table drift",
+        any("no_such_param" in line for line in caught),
+        str(caught),
+    )
 
     # MAJOR regression: the three drift causes must name THEMSELVES. Reporting an
     # unparseable file as "no definition found" sent the reader grepping for a def
@@ -1045,135 +964,108 @@ def _self_test() -> int:
     missing, why_missing = _signature_params("src/kiro_crew/no_such_module.py", "x")
     absent, why_absent = _signature_params("src/kiro_crew/hooks.py", "no_such_function")
     real, why_real = _signature_params("src/kiro_crew/hooks.py", "on_tool_call")
-    causes_ok = (
+    check(
+        "a missing file, an absent def and a real def are told apart",
         missing is None
         and "does not exist" in why_missing
         and absent is None
         and "no module-level or class-body definition" in why_absent
         and real is not None
-        and "session_key" in real
+        and "session_key" in real,
+        f"{why_missing!r} / {why_absent!r} / {why_real!r}",
     )
-    if causes_ok:
-        print("  ok   a missing file, an absent def and a real def are told apart")
-    else:
-        failed += 1
-        print(f"  FAIL drift causes conflated: {why_missing!r} / {why_absent!r} / {why_real!r}")
-    extra += 1
 
-    # H1: the LAST same-scope def is the one Python binds. Returning the first let
-    # a stale copy -- or the permissive half of a branch pair -- validate the table
+    probe = Path(tempfile.mkdtemp())
+    (probe / "p").mkdir()
+
+    # H1: the LAST same-scope def is the one Python binds. Returning the first let a
+    # stale copy -- or the permissive half of a branch pair -- validate the table
     # against a signature nothing runs.
-    import tempfile
-
-    probe_root = Path(tempfile.mkdtemp())
-    (probe_root / "p").mkdir()
-    saved_root = globals()["ROOT"]
-    try:
-        globals()["ROOT"] = probe_root
-        (probe_root / "p" / "dbl.py").write_text(
-            "def governance_permits(scope, item):\n    return 1\n\n"
-            "def governance_permits(scope, item, *, session_key='', agent='', app=''):\n"
-            "    return 2\n",
-            encoding="utf-8",
-        )
-        shadowed, _ = _signature_params("p/dbl.py", "governance_permits")
-        # H2: a **kwargs catch-all accepts every identity, so drift must NOT fire.
-        (probe_root / "p" / "kw.py").write_text(
-            "def governance_permits(scope, item, **kwargs):\n    return 1\n", encoding="utf-8"
-        )
-        catchall, _ = _signature_params("p/kw.py", "governance_permits")
-    finally:
-        globals()["ROOT"] = saved_root
-
-    if shadowed is not None and "session_key" in shadowed:
-        print("  ok   a shadowed def resolves to the one Python binds, not the first")
-    else:
-        failed += 1
-        print(f"  FAIL shadowed def resolved to the wrong signature: {shadowed}")
-    extra += 1
-
-    if catchall is not None and AUTHZ_FUNCS["governance_permits"].identities <= catchall:
-        print("  ok   a **kwargs catch-all does not brick the drift check")
-    else:
-        failed += 1
-        print(f"  FAIL a **kwargs signature reported false drift: {catchall}")
-    extra += 1
-
-    # The narrowing: every budget is DERIVED from its signature, and the positional
-    # rule is inert wherever an identity cannot travel positionally. A hand-written
-    # budget was the same drift surface the table itself had.
-    derived = _contracts()
-    expected_contracts = {
-        "governance_permits": (2, frozenset()),
-        "resolve_active_scope": (1, frozenset()),
-        "on_tool_call": (1, frozenset()),
-        "_vet_spawn_governance": (2, frozenset({"app"})),
-    }
-    if derived == expected_contracts:
-        print("  ok   every positional budget is derived from its real signature")
-    else:
-        failed += 1
-        print(f"  FAIL derived contracts disagree with the signatures: {derived}")
-    extra += 1
-
-    inert = [n for n, (_, reach) in derived.items() if not reach]
-    if sorted(inert) == ["governance_permits", "on_tool_call", "resolve_active_scope"]:
-        print("  ok   the positional rule is inert on the three keyword-only entry points")
-    else:
-        failed += 1
-        print(f"  FAIL wrong set of keyword-only entry points: {sorted(inert)}")
-    extra += 1
-
+    (probe / "p" / "dbl.py").write_text(
+        "def governance_permits(scope, item):\n    return 1\n\n"
+        "def governance_permits(scope, item, *, session_key='', agent='', app=''):\n"
+        "    return 2\n",
+        encoding="utf-8",
+    )
+    # H2: a **kwargs catch-all accepts every identity, so drift must NOT fire.
+    (probe / "p" / "kw.py").write_text(
+        "def governance_permits(scope, item, **kwargs):\n    return 1\n", encoding="utf-8"
+    )
     # `self` must not count toward a bound method's budget: every call site in the
     # tree invokes the bound method and never passes it.
-    (probe_root / "p" / "meth.py").write_text(
+    (probe / "p" / "meth.py").write_text(
         "class H:\n"
         "    def on_tool_call(self, tool_name, *, session_key='', agent='', app=''):\n"
         "        return 1\n",
         encoding="utf-8",
     )
-    saved = globals()["ROOT"]
-    try:
-        globals()["ROOT"] = probe_root
-        msig, _ = _read_signature("p/meth.py", "on_tool_call")
-    finally:
-        globals()["ROOT"] = saved
-    if msig is not None and msig.positional == ["tool_name"]:
-        print("  ok   a bound method's leading self is excluded from the budget")
-    else:
-        failed += 1
-        print(f"  FAIL self leaked into the positional set: {msig and msig.positional}")
-    extra += 1
+    with rooted(probe):
+        shadowed, _ = _signature_params("p/dbl.py", "governance_permits")
+        catchall, _ = _signature_params("p/kw.py", "governance_permits")
+        method, _ = _read_signature("p/meth.py", "on_tool_call")
+
+    check(
+        "a shadowed def resolves to the one Python binds, not the first",
+        shadowed is not None and "session_key" in shadowed,
+        str(shadowed),
+    )
+    check(
+        "a **kwargs catch-all does not brick the drift check",
+        catchall is not None and AUTHZ_FUNCS["governance_permits"].identities <= catchall,
+        str(catchall),
+    )
+    check(
+        "a bound method's leading self is excluded from the budget",
+        method is not None and method.positional == ["tool_name"],
+        str(method and method.positional),
+    )
+
+    # The narrowing: every budget is DERIVED from its signature, and the positional
+    # rule is inert wherever an identity cannot travel positionally. A hand-written
+    # budget was the same drift surface the table itself had.
+    derived = _contracts()
+    check(
+        "every positional budget is derived from its real signature",
+        derived
+        == {
+            "governance_permits": (2, frozenset()),
+            "resolve_active_scope": (1, frozenset()),
+            "on_tool_call": (1, frozenset()),
+            "_vet_spawn_governance": (2, frozenset({"app"})),
+        },
+        str(derived),
+    )
+    inert = sorted(name for name, (_, reach) in derived.items() if not reach)
+    check(
+        "the positional rule is inert on the three keyword-only entry points",
+        inert == ["governance_permits", "on_tool_call", "resolve_active_scope"],
+        str(inert),
+    )
 
     # B2: a malformed baseline must ERROR, never parse to zero and invite a re-seed.
-    bad = probe_root / "bad-baseline.txt"
+    bad = probe / "bad-baseline.txt"
     bad.write_text("# header\nxx src/a.py\n", encoding="utf-8")
     try:
         _read_baseline(bad)
     except BaselineError:
-        print("  ok   a malformed baseline raises rather than reading as empty")
+        check("a malformed baseline raises rather than reading as empty", True)
     else:
-        failed += 1
-        print("  FAIL a malformed baseline parsed as empty")
-    extra += 1
+        check("a malformed baseline raises rather than reading as empty", False)
 
     # B2: --update-baseline must never raise a recorded count.
-    raised = _shrunken_baseline({"a.py": 1, "b.py": 5}, {"a.py": 9, "b.py": 2})
-    if raised == {"a.py": 1, "b.py": 2}:
-        print("  ok   a baseline refresh lowers and prunes, never raises")
-    else:
-        failed += 1
-        print(f"  FAIL baseline refresh was not shrink-only: {raised}")
-    extra += 1
+    lowered = _shrunken_baseline({"a.py": 1, "b.py": 5}, {"a.py": 9, "b.py": 2})
+    check(
+        "a baseline refresh lowers and prunes, never raises",
+        lowered == {"a.py": 1, "b.py": 2},
+        str(lowered),
+    )
+    check(
+        "a file that went clean is pruned from the baseline",
+        _shrunken_baseline({"a.py": 3}, {}) == {},
+    )
 
-    if _shrunken_baseline({"a.py": 3}, {}) == {}:
-        print("  ok   a file that went clean is pruned from the baseline")
-    else:
-        failed += 1
-        print("  FAIL a clean file survived the baseline refresh")
-    extra += 1
-
-    print(f"\nself-test: {len(cases) + extra - failed} passed, {failed} failed")
+    failed = [label for label, ok in results if not ok]
+    print(f"\nself-test: {len(results) - len(failed)} passed, {len(failed)} failed")
     return 1 if failed else 0
 
 
