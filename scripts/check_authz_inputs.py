@@ -199,11 +199,28 @@ AUTHZ_FUNCS: dict[str, AuthzFunc] = {
 #: Every parameter name that is identity-shaped on one of these entry points.
 #: Used ONLY to detect the reverse of the drift the table check catches: a table
 #: demanding a parameter that does not exist is LOUD (the gate fails), but a
-#: signature GAINING an identity the table does not name is SILENT -- the gate
-#: quietly stops covering it and still reports a clean pass. This list is
-#: hand-maintained, which is tolerable here and not in AUTHZ_FUNCS because the
-#: failure modes are inverted: a name missing from here costs a missed warning,
-#: a name missing from AUTHZ_FUNCS costs silent under-coverage.
+#: signature GAINING an OPTIONAL identity the table does not name is SILENT -- the
+#: gate quietly stops covering it and still reports a clean pass.
+#:
+#: This list is hand-maintained, and that is a REAL residual blind spot -- NOT a
+#: milder, inverted failure mode, as an earlier version of this comment claimed. An
+#: identity added to a signature but to NEITHER this set NOR AUTHZ_FUNCS is covered
+#: by nothing and says nothing: an optional `sponsor_agent` planted on a real entry
+#: point and in neither set left the self-test green and the gate at its 34
+#: findings -- total silence. That is the SAME silent-under-coverage failure as
+#: omitting a name from AUTHZ_FUNCS, displaced by one manual step, not softened. The
+#: reverse-drift check caught `caller_agent` only because `caller_agent` was
+#: hand-added here first: its efficacy on its one motivating case depended on the
+#: very discipline it is meant to backstop.
+#:
+#: Keep the check regardless -- it is strictly better than none, converting every
+#: gained identity whose name IS listed here from silent to loud. But the discipline
+#: is explicit and unavoidable: when you add an identity-shaped parameter to any
+#: entry point, add its name here too, or this check cannot see it. (A shape
+#: heuristic -- flag an unlisted optional param merely NAMED like an identity -- was
+#: evaluated and not adopted: it only moves the blind spot to names that do not fit
+#: the shape, and misfires on ordinary `*_id`/`*_key` params, trading one silent gap
+#: for noisy false ones.)
 KNOWN_IDENTITY_NAMES = frozenset(
     {"session_key", "agent", "app", "caller_agent", "task", "resolved_agent"}
 )
@@ -214,8 +231,20 @@ KNOWN_IDENTITY_NAMES = frozenset(
 #: failure rather than silent under-coverage, so merging in the wrong order is loud
 #: and the message names the fix. It cannot be pre-empted here: naming
 #: `caller_agent` in the table before #9053 exists fails the FORWARD direction, for
-#: demanding a parameter no signature has. When #9053 lands, add `caller_agent` to
-#: the `_vet_spawn_governance` entry.
+#: demanding a parameter no signature has.
+#:
+#: When #9053 lands, adding `caller_agent` to the `_vet_spawn_governance` entry is
+#: NECESSARY BUT NOT SUFFICIENT. The table entry demands the identity at EVERY call
+#: site, so the entry ALONE turns every call that omits it into a fresh finding and
+#: the gate goes RED (verified: table entry + #9053 signature, current call site ->
+#: `admission.py: does not state caller_agent`, exit 1). #9053 is green only because
+#: it ALSO threads `caller_agent` at the sole call site,
+#: `src/kiro_crew/subagent_manager/admission.py`. So the step is: add the table
+#: entry AND confirm every call site passes the new identity -- admission.py is the
+#: one that must. And verify it with the FULL gate, never `--test` alone: `--test`
+#: is blind to call sites and to the baseline, and it reports a clean pass in a
+#: merge state where the full gate is RED (verified). Any claim about a merge state
+#: must be shown against the full gate.
 
 #: Identity-shaped parameters deliberately NOT demanded, and why. Omitting
 #: `resolved_agent` FAIL-CLOSES to interactive approval (see the comment at
@@ -394,10 +423,21 @@ def _table_drift() -> list[str]:
     """
     problems: list[str] = []
     for name, spec in sorted(AUTHZ_FUNCS.items()):
-        params, why = _signature_params(spec.defined_in, name)
-        if params is None:
+        # Read the signature ONCE per entry point. This check needs both the
+        # parameter names (forward drift) and their optional-ness (reverse drift)
+        # from the same parse; a second `_read_signature` here was a redundant full
+        # AST re-parse. `_signature_params` still wraps `_read_signature` for the
+        # self-test, which calls it directly.
+        sig, why = _read_signature(spec.defined_in, name)
+        if sig is None:
             problems.append(f"{name}: {why}")
             continue
+        # A `**kwargs` catch-all accepts every identity at runtime, so no demanded
+        # identity can be proven absent: fold the declared set in rather than report
+        # it as drift. `name` is always in AUTHZ_FUNCS here -- we iterate it.
+        params = sig.params
+        if sig.var_keyword:
+            params |= set(spec.identities)
         unknown = sorted(spec.identities - params)
         if unknown:
             problems.append(
@@ -411,9 +451,7 @@ def _table_drift() -> list[str]:
         # `_vet_spawn_governance(session_key, agent)` and `resolve_active_scope`'s
         # `session_key` are both required, and flagging them was this check's own
         # first false positive.
-        sig, _ = _read_signature(spec.defined_in, name)
-        optional = sig.optional if sig is not None else set()
-        uncovered = sorted((optional & KNOWN_IDENTITY_NAMES) - spec.identities - NOT_DEMANDED)
+        uncovered = sorted((sig.optional & KNOWN_IDENTITY_NAMES) - spec.identities - NOT_DEMANDED)
         if uncovered:
             problems.append(
                 f"{name}: the signature in {spec.defined_in} takes "
@@ -1168,21 +1206,37 @@ def _self_test() -> int:
         set(derived) == readable,
         f"derived={sorted(derived)} readable={sorted(readable)}",
     )
-    check(
-        "a positionally-reachable name is always a DECLARED identity",
-        all(reach <= AUTHZ_FUNCS[name].identities for name, (_, reach) in derived.items()),
-        str(derived),
-    )
     inert = {name for name, (_, reach) in derived.items() if not reach}
     check(
         "the rule is inert on every entry point that is already keyword-only",
         {"governance_permits", "on_tool_call", "resolve_active_scope"} <= inert,
         f"inert={sorted(inert)}",
     )
-    # Deliberately NOT asserted: whether `_vet_spawn_governance` is inert. It is
-    # live today and goes inert the moment #9053 adds its `*`. BOTH states are
-    # correct, so pinning either re-couples this harness to that PR -- the whole
-    # defect this block exists to have fixed. Reported as a diagnostic instead.
+    # Deliberately NOT asserted: whether `_vet_spawn_governance` is inert. No
+    # assertion is warranted here -- verified, not assumed. It is live today and goes
+    # inert the moment `_vet_spawn_governance` gains its `*` (with #9053, or a
+    # plausible standalone `*`-only refactor). Both are CORRECT states:
+    #   - The `*`-only refactor loses NO enforcement. Keyword-only identities retire
+    #     the positional rule (a surplus positional is then a TypeError), and the
+    #     plain-omission catch in `_findings_in_source` still flags an omitted
+    #     identity -- verified: under a keyword-only `_vet_spawn_governance`, a call
+    #     omitting `app` is reported "does not state app" and the gate exits nonzero.
+    #     The positional rule only ever refined the MESSAGE for a positionally-passed
+    #     identity; the omission itself is caught either way.
+    #   - Pinning `_vet_spawn_governance` as live (`still_live == [...]`, or the
+    #     reviewed `still_live in ([], [...])`) false-positives on BOTH the `*`-only
+    #     refactor and the full #9053 merge -- re-coupling this harness to one side
+    #     of that PR, the exact defect this block was written to fix. The
+    #     `in ([], [...])` form additionally ACCEPTS `[]`, the very state the
+    #     refactor produces, so it cannot catch what it claims to.
+    # A correlation assertion (derived-inert agrees with keyword-only-ness) is
+    # tautological: `reach` IS `sig.positional & identities`, so it merely restates
+    # `_positional_contract` -- the near-vacuity deleted just above. The genuinely
+    # wrong states are caught elsewhere: a dropped contract by "every readable entry
+    # point gets a derived contract", the positional filter over-firing by "the rule
+    # is inert on every entry point that is already keyword-only", and the filter
+    # logic itself by the synthetic `_positional_contract` cases. What is left is
+    # awareness of WHICH entry points are live -- a diagnostic, not an invariant.
     still_live = sorted(name for name, (_, reach) in derived.items() if reach)
     print(f"  --   positional rule currently live on: {still_live or ['nothing']}")
 

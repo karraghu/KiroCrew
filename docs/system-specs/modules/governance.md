@@ -1279,6 +1279,16 @@ pre-empted -- naming `caller_agent` before the parameter exists fails the
 forward direction -- and merging in the wrong order fails the reverse one with a
 message naming the fix, rather than quietly leaving the new identity uncovered.
 
+When #9053 lands, adding `caller_agent` to the `_vet_spawn_governance` table entry
+is necessary but NOT sufficient. The entry demands the identity at every call site,
+so the entry alone turns each call that omits it into a finding and the gate goes
+red; it is green only because #9053 ALSO threads `caller_agent` at the sole call
+site, `subagent_manager/admission.py`. The step is therefore: add the table entry
+AND confirm every call site passes the identity, `admission.py` being the one that
+must. Verify any such merge-state claim with the FULL gate, never
+`check_authz_inputs.py --test` alone -- `--test` is blind to call sites and to the
+baseline, and it reports a clean pass in a state where the full gate is red.
+
 An `_AuthContext` with no defaults would be strictly stronger than any of this,
 making omission a type error rather than a lint; read the gate as the stopgap
 that keeps the class from growing until that refactor is funded.
