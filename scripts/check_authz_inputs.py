@@ -196,6 +196,33 @@ AUTHZ_FUNCS: dict[str, AuthzFunc] = {
     ),
 }
 
+#: Every parameter name that is identity-shaped on one of these entry points.
+#: Used ONLY to detect the reverse of the drift the table check catches: a table
+#: demanding a parameter that does not exist is LOUD (the gate fails), but a
+#: signature GAINING an identity the table does not name is SILENT -- the gate
+#: quietly stops covering it and still reports a clean pass. This list is
+#: hand-maintained, which is tolerable here and not in AUTHZ_FUNCS because the
+#: failure modes are inverted: a name missing from here costs a missed warning,
+#: a name missing from AUTHZ_FUNCS costs silent under-coverage.
+KNOWN_IDENTITY_NAMES = frozenset(
+    {"session_key", "agent", "app", "caller_agent", "task", "resolved_agent"}
+)
+
+#: ORDERING NOTE -- this gate must land AFTER PR #9053, not before. That PR adds an
+#: optional `caller_agent` to `_vet_spawn_governance`, which the table below does
+#: not demand. The reverse-drift check turns that into a hard, self-explaining
+#: failure rather than silent under-coverage, so merging in the wrong order is loud
+#: and the message names the fix. It cannot be pre-empted here: naming
+#: `caller_agent` in the table before #9053 exists fails the FORWARD direction, for
+#: demanding a parameter no signature has. When #9053 lands, add `caller_agent` to
+#: the `_vet_spawn_governance` entry.
+
+#: Identity-shaped parameters deliberately NOT demanded, and why. Omitting
+#: `resolved_agent` FAIL-CLOSES to interactive approval (see the comment at
+#: hooks.py:1006-1009), so a gate premised on omission WIDENING must not demand
+#: it. Anything listed here is a decision on the record, not an oversight.
+NOT_DEMANDED = frozenset({"resolved_agent"})
+
 #: `asyncio.to_thread(fn, *args, **kwargs)` passes the callee as arg 0, so the real
 #: call is one slot to the right. Without this the positional budget is off by one
 #: for every threaded authorization call, and `cli_chat.py` routes the spawn
@@ -233,12 +260,22 @@ class Signature:
     the tree invokes the bound method and never passes it.
     """
 
-    __slots__ = ("positional", "keyword_only", "var_keyword")
+    __slots__ = ("positional", "keyword_only", "var_keyword", "optional")
 
-    def __init__(self, positional: list[str], keyword_only: set[str], var_keyword: str):
+    def __init__(
+        self,
+        positional: list[str],
+        keyword_only: set[str],
+        var_keyword: str,
+        optional: set[str] | None = None,
+    ):
         self.positional = positional
         self.keyword_only = keyword_only
         self.var_keyword = var_keyword
+        #: Parameters carrying a DEFAULT -- the ones a caller can leave out with
+        #: nothing complaining. A required parameter needs no gate: omitting it is
+        #: a TypeError, so only these can be silently dropped.
+        self.optional = optional if optional is not None else set()
 
     @property
     def params(self) -> set[str]:
@@ -312,11 +349,18 @@ def _read_signature(rel: str, name: str) -> tuple[Signature | None, str]:
     positional = [p.arg for p in (*a.posonlyargs, *a.args)]
     if in_class and positional and positional[0] in ("self", "cls"):
         positional = positional[1:]
+    # Defaults bind to the TAIL of the positional list, so the last len(defaults)
+    # names are the optional ones. Keyword-only defaults are positional in
+    # kw_defaults, with None marking a keyword-only parameter that is REQUIRED.
+    all_positional = [p.arg for p in (*a.posonlyargs, *a.args)]
+    optional = set(all_positional[len(all_positional) - len(a.defaults) :]) if a.defaults else set()
+    optional |= {p.arg for p, default in zip(a.kwonlyargs, a.kw_defaults) if default is not None}
     return (
         Signature(
             positional=positional,
             keyword_only={p.arg for p in a.kwonlyargs},
             var_keyword=a.kwarg.arg if a.kwarg else "",
+            optional=optional,
         ),
         "",
     )
@@ -359,6 +403,22 @@ def _table_drift() -> list[str]:
             problems.append(
                 f"{name}: the table demands {', '.join(unknown)}, absent from the "
                 f"signature in {spec.defined_in}"
+            )
+        # The silent direction: an OPTIONAL identity-shaped parameter the signature
+        # has and the table does not name. Left undetected the gate simply stops
+        # covering that identity while still reporting a clean pass. Restricted to
+        # optional parameters because a REQUIRED one cannot be silently omitted --
+        # `_vet_spawn_governance(session_key, agent)` and `resolve_active_scope`'s
+        # `session_key` are both required, and flagging them was this check's own
+        # first false positive.
+        sig, _ = _read_signature(spec.defined_in, name)
+        optional = sig.optional if sig is not None else set()
+        uncovered = sorted((optional & KNOWN_IDENTITY_NAMES) - spec.identities - NOT_DEMANDED)
+        if uncovered:
+            problems.append(
+                f"{name}: the signature in {spec.defined_in} takes "
+                f"{', '.join(uncovered)}, which the table does not demand -- add it "
+                f"to AUTHZ_FUNCS, or to NOT_DEMANDED with the reason it is safe to omit"
             )
     return problems
 
@@ -811,7 +871,7 @@ def _self_test() -> int:
     clean: dict[str, str] = {
         "complete call is clean": 'governance_permits("apps", n, session_key=k, agent=a, app=p)',
         "explicit empty is a DECLARATION, not a violation": 'governance_permits("apps", n, session_key=k, agent="", app="")',
-        "the spawn ceiling through to_thread is unwrapped and judged": "await asyncio.to_thread(_vet_spawn_governance, k, t, app=p)",
+        "the spawn ceiling through to_thread is unwrapped and judged": "await asyncio.to_thread(_vet_spawn_governance, k, t, app=p, caller_agent=c)",
         "a dict-literal splat IS resolvable": 'governance_permits(s, n, **{"session_key": k, "agent": a, "app": p})',
         "the marker exempts, as a comment": 'governance_permits("apps", n)  # authz-inputs: boot-time, no session',
         "a trailing marker on a MULTI-LINE call's opening line exempts it": "await self.on_tool_call(  # authz-inputs: unrelated same-named method\n    a, b, c, d\n)\n",
@@ -834,10 +894,6 @@ def _self_test() -> int:
         "a threaded ceiling call that omits the app it has": (
             "await asyncio.to_thread(_vet_spawn_governance, k, t)",
             "does not state app",
-        ),
-        "the positional-collision trap: caller riding the app slot": (
-            "await asyncio.to_thread(_vet_spawn_governance, k, t, c)",
-            "app is reachable positionally",
         ),
         "an opaque splat cannot be proven complete": (
             "governance_permits(s, n, **ctx)",
@@ -958,6 +1014,44 @@ def _self_test() -> int:
         str(caught),
     )
 
+    # The SILENT direction: a signature that takes an identity the table does not
+    # demand. PR #9053 adds `caller_agent` to `_vet_spawn_governance`, whose entry
+    # declares only {"app"} -- simulated, the gate passed clean and never mentioned
+    # it. Dropping an identity from a table entry must therefore FAIL, not narrow.
+    narrowed = AUTHZ_FUNCS["governance_permits"]
+    AUTHZ_FUNCS["governance_permits"] = AuthzFunc(
+        narrowed.defined_in, narrowed.identities - {"app"}
+    )
+    try:
+        silent = _table_drift()
+    finally:
+        AUTHZ_FUNCS["governance_permits"] = narrowed
+    check(
+        "an identity the signature takes but the table omits is caught, not ignored",
+        any("does not demand" in line and "app" in line for line in silent),
+        str(silent),
+    )
+    # The other half of that rule, and its first false positive: a REQUIRED
+    # identity-shaped parameter must NOT be reported. `_vet_spawn_governance` takes
+    # a required `agent` and `resolve_active_scope` a required `session_key`,
+    # neither declared in the table; omitting either is a TypeError, so the
+    # interpreter is the gate and this check must stay quiet about them.
+    # Scoped to the required parameters this is ABOUT. Asserting `not _table_drift()`
+    # instead made the case fail for unrelated drift, so its label and its assertion
+    # disagreed -- the over-broad shape this gate exists to catch, one level up.
+    required_names = ("agent", "session_key")
+    drift_now = _table_drift()
+    check(
+        "a REQUIRED identity-shaped parameter is not reported as uncovered",
+        not [
+            line
+            for line in drift_now
+            if "does not demand" in line
+            and any(f"takes {n}," in line or f", {n}," in line for n in required_names)
+        ],
+        str(drift_now),
+    )
+
     # MAJOR regression: the three drift causes must name THEMSELVES. Reporting an
     # unparseable file as "no definition found" sent the reader grepping for a def
     # the gate could see all along.
@@ -1020,27 +1114,77 @@ def _self_test() -> int:
         str(method and method.positional),
     )
 
-    # The narrowing: every budget is DERIVED from its signature, and the positional
-    # rule is inert wherever an identity cannot travel positionally. A hand-written
-    # budget was the same drift surface the table itself had.
-    derived = _contracts()
+    # `_positional_contract` on signatures this test OWNS. Proving the derivation
+    # against synthetic input is what keeps the harness honest without coupling it
+    # to whatever the tree's four entry points happen to declare this week.
+    ids = frozenset({"app", "caller_agent"})
+    kw_only_sig = Signature(["session_key", "agent"], {"app", "caller_agent"}, "")
+    positional_sig = Signature(["session_key", "agent", "app"], {"caller_agent"}, "")
     check(
-        "every positional budget is derived from its real signature",
-        derived
-        == {
-            "governance_permits": (2, frozenset()),
-            "resolve_active_scope": (1, frozenset()),
-            "on_tool_call": (1, frozenset()),
-            "_vet_spawn_governance": (2, frozenset({"app"})),
-        },
+        "a keyword-only entry point derives an empty reachable set",
+        _positional_contract(kw_only_sig, ids) == (2, frozenset()),
+        str(_positional_contract(kw_only_sig, ids)),
+    )
+    check(
+        "an identity sitting in a positional slot is derived as reachable",
+        _positional_contract(positional_sig, ids) == (2, frozenset({"app"})),
+        str(_positional_contract(positional_sig, ids)),
+    )
+
+    # The positional RULE, exercised against a contract this test controls. This
+    # probe used to live in the `flagged` table and read the live signature, which
+    # coupled it to a signature PR #9053 rewrites: making `app` keyword-only
+    # correctly retires the rule, and the probe then failed for reporting the
+    # retirement. Both directions are pinned here instead.
+    collision_src = "await asyncio.to_thread(_vet_spawn_governance, k, t, c)"
+    saved_contracts = globals()["_CONTRACTS"]
+    try:
+        globals()["_CONTRACTS"] = {"_vet_spawn_governance": (2, frozenset({"app"}))}
+        while_reachable = _findings_in_source(collision_src)
+        globals()["_CONTRACTS"] = {"_vet_spawn_governance": (2, frozenset())}
+        once_keyword_only = _findings_in_source(collision_src)
+    finally:
+        globals()["_CONTRACTS"] = saved_contracts
+    check(
+        "an identity riding a positional slot is caught while that slot is reachable",
+        len(while_reachable) == 1 and "app is reachable positionally" in while_reachable[0].reason,
+        str(while_reachable),
+    )
+    check(
+        "the same call is no longer a POSITIONAL finding once the identity is keyword-only",
+        not any("reachable positionally" in f.reason for f in once_keyword_only),
+        str(once_keyword_only),
+    )
+
+    # The live tree, asserted only where the claim survives a signature change.
+    derived = _contracts()
+    readable = {
+        name
+        for name, spec in AUTHZ_FUNCS.items()
+        if _read_signature(spec.defined_in, name)[0] is not None
+    }
+    check(
+        "every readable entry point gets a derived contract",
+        set(derived) == readable,
+        f"derived={sorted(derived)} readable={sorted(readable)}",
+    )
+    check(
+        "a positionally-reachable name is always a DECLARED identity",
+        all(reach <= AUTHZ_FUNCS[name].identities for name, (_, reach) in derived.items()),
         str(derived),
     )
-    inert = sorted(name for name, (_, reach) in derived.items() if not reach)
+    inert = {name for name, (_, reach) in derived.items() if not reach}
     check(
-        "the positional rule is inert on the three keyword-only entry points",
-        inert == ["governance_permits", "on_tool_call", "resolve_active_scope"],
-        str(inert),
+        "the rule is inert on every entry point that is already keyword-only",
+        {"governance_permits", "on_tool_call", "resolve_active_scope"} <= inert,
+        f"inert={sorted(inert)}",
     )
+    # Deliberately NOT asserted: whether `_vet_spawn_governance` is inert. It is
+    # live today and goes inert the moment #9053 adds its `*`. BOTH states are
+    # correct, so pinning either re-couples this harness to that PR -- the whole
+    # defect this block exists to have fixed. Reported as a diagnostic instead.
+    still_live = sorted(name for name, (_, reach) in derived.items() if reach)
+    print(f"  --   positional rule currently live on: {still_live or ['nothing']}")
 
     # B2: a malformed baseline must ERROR, never parse to zero and invite a re-seed.
     bad = probe / "bad-baseline.txt"

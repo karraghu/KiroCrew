@@ -1253,8 +1253,14 @@ PR, and a spec citing one gives a future reader nothing to check.
 positional slot (`_vet_spawn_governance`'s third positional is `app`, so a
 positional caller binds there, type-checks, runs and enforces nothing) and an
 opaque `*args`/`**splat` it cannot prove complete. Its `AUTHZ_FUNCS` table is
-checked against the real signatures on every run, because the gate's own first
-cut demanded a parameter that did not exist and its self-test passed anyway.
+checked against the real signatures on every run, in BOTH directions, because
+the gate's own first cut demanded a parameter that did not exist and its
+self-test passed anyway. The reverse direction carries more weight: a table
+demanding an absent parameter fails LOUDLY, whereas a signature that gains an
+optional identity the table does not name would silently stop being covered
+while the gate still reported a clean pass. Only optional parameters are read
+that way -- a required one cannot be omitted without a `TypeError`, so the
+interpreter is already the gate.
 
 Two things the gate deliberately does NOT do. It does not demand
 `resolved_agent` on `on_tool_call`: omitting that one is FAIL-CLOSED, not
@@ -1263,9 +1269,15 @@ auto-approve, so an empty value yields no identity and falls to interactive
 approval. And it does not check a positional identity where one cannot travel
 positionally: the budget is derived from each signature, so for a keyword-only
 entry point — three of the four — the check is skipped, because a surplus
-positional is a `TypeError` rather than an unseen defect. Make
-`_vet_spawn_governance`'s `app` keyword-only and that class becomes
-unrepresentable everywhere, retiring the rule.
+positional is a `TypeError` rather than an unseen defect. PR #9053 makes
+`_vet_spawn_governance`'s identities keyword-only, so that class becomes
+unrepresentable everywhere and the rule retires itself with no edit to the gate.
+
+That makes the merge ORDER load-bearing: this gate must land after #9053, which
+also adds a `caller_agent` identity the table does not yet demand. It cannot be
+pre-empted -- naming `caller_agent` before the parameter exists fails the
+forward direction -- and merging in the wrong order fails the reverse one with a
+message naming the fix, rather than quietly leaving the new identity uncovered.
 
 An `_AuthContext` with no defaults would be strictly stronger than any of this,
 making omission a type error rather than a lint; read the gate as the stopgap
